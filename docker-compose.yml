@@ -5,8 +5,8 @@ services:
     build: .
     container_name: curation-bot
     restart: unless-stopped
-    expose:
-      - "8000"
+    ports:
+      - "8000:8000"
     env_file:
       - .env
     volumes:
@@ -15,31 +15,5 @@ services:
       - DATABASE_URL=sqlite:////app/data/curation_bot.db
       - API_HOST=0.0.0.0
 
-  nginx:
-    image: nginx:alpine
-    container_name: curation-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - certbot-etc:/etc/letsencrypt:ro
-      - certbot-var:/var/lib/letsencrypt
-      - certbot-webroot:/var/www/certbot
-    depends_on:
-      - curation-bot
-
-  certbot:
-    image: certbot/certbot
-    container_name: curation-certbot
-    volumes:
-      - certbot-etc:/etc/letsencrypt
-      - certbot-var:/var/lib/letsencrypt
-      - certbot-webroot:/var/www/certbot
-
 volumes:
   bot-data:
-  certbot-etc:
-  certbot-var:
-  certbot-webroot:
