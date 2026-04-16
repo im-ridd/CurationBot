@@ -6,7 +6,7 @@ services:
     container_name: curation-bot
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8001:8001"
     env_file:
       - .env
     volumes:

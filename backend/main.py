@@ -26,6 +26,11 @@ def main():
     args = parser.parse_args()
 
     if args.autostart:
+        # Ensure tables exist before autostart
+        from backend.database import engine
+        from backend.models import Base
+        Base.metadata.create_all(bind=engine)
+
         from backend.services.bot_manager import BotManager
         result = BotManager().start_all_enabled()
         logger.info(f"Auto-start result: {result}")
