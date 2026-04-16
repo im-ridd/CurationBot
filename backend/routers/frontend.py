@@ -65,8 +65,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "fanbase_entries": {"total": fb_total, "enabled": fb_enabled},
         "trail_rules": {"total": tr_total, "enabled": tr_enabled},
     }
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, "stats": stats, "voters": voter_list,
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "stats": stats, "voters": voter_list,
     })
 
 
@@ -84,8 +84,7 @@ def voter_detail(request: Request, voter_id: int, db: Session = Depends(get_db))
     )
     flash = request.query_params.get("flash")
     flash_error = request.query_params.get("error")
-    return templates.TemplateResponse("voter_detail.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "voter_detail.html", {
         "voter": {
             "id": voter.id, "username": voter.username, "enabled": voter.enabled,
             "min_voting_power": voter.min_voting_power,
@@ -118,8 +117,8 @@ def trails_page(request: Request, db: Session = Depends(get_db)):
 
     flash = request.query_params.get("flash")
     flash_error = request.query_params.get("error")
-    return templates.TemplateResponse("trails.html", {
-        "request": request, "trails": trail_list,
+    return templates.TemplateResponse(request, "trails.html", {
+        "trails": trail_list,
         "voters": [{"id": v.id, "username": v.username} for v in voters],
         "flash": flash, "flash_error": flash_error,
     })
@@ -172,8 +171,8 @@ def partial_account_cards(request: Request, db: Session = Depends(get_db)):
             accounts.append(f.result())
     accounts.sort(key=lambda a: a["username"])
 
-    return templates.TemplateResponse("partials/account_cards.html", {
-        "request": request, "accounts": accounts,
+    return templates.TemplateResponse(request, "partials/account_cards.html", {
+        "accounts": accounts,
     })
 
 
@@ -181,16 +180,15 @@ def partial_account_cards(request: Request, db: Session = Depends(get_db)):
 def partial_single_account(request: Request, username: str):
     """HTMX partial: live blockchain data for one voter."""
     info = _fetch_account_info(username)
-    return templates.TemplateResponse("partials/account_info_single.html", {
-        "request": request, "acc": info,
+    return templates.TemplateResponse(request, "partials/account_info_single.html", {
+        "acc": info,
     })
 
 
 @router.get("/partials/runtime-status", response_class=HTMLResponse)
 def partial_runtime_status(request: Request):
     mgr = _mgr()
-    return templates.TemplateResponse("partials/runtime_status.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "partials/runtime_status.html", {
         "curation": mgr.get_all_status(),
         "trails": mgr.get_all_trail_status(),
     })
@@ -199,8 +197,7 @@ def partial_runtime_status(request: Request):
 @router.get("/partials/trail-status", response_class=HTMLResponse)
 def partial_trail_status(request: Request):
     mgr = _mgr()
-    return templates.TemplateResponse("partials/trail_status.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "partials/trail_status.html", {
         "trails": mgr.get_all_trail_status(),
     })
 
@@ -218,8 +215,8 @@ def partial_activity(request: Request):
             events.append({**ev, "source": s["voter"], "author": "", "type": "trail"})
     # Sort newest first (already newest-first per engine, merge sort by timestamp)
     events.sort(key=lambda e: e["ts"], reverse=True)
-    return templates.TemplateResponse("partials/activity_feed.html", {
-        "request": request, "events": events[:80],
+    return templates.TemplateResponse(request, "partials/activity_feed.html", {
+        "events": events[:80],
     })
 
 
@@ -232,8 +229,8 @@ def partial_trail_activity(request: Request):
         for ev in s.get("activity", []):
             events.append({**ev, "source": s["voter"]})
     events.sort(key=lambda e: e["ts"], reverse=True)
-    return templates.TemplateResponse("partials/trail_activity.html", {
-        "request": request, "events": events[:50],
+    return templates.TemplateResponse(request, "partials/trail_activity.html", {
+        "events": events[:50],
     })
 
 
