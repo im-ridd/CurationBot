@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}@{{ voter.username }} — CurationBot{% endblock %}
+
+{% block content %}
+<div class="voter-header">
+    <div>
+        <h1>@{{ voter.username }}</h1>
+        <p>
+            {% if voter.enabled %}<span class="badge badge-green">enabled</span>{% else %}<span class="badge badge-red">disabled</span>{% endif %}
+            &nbsp; VP ≥ {{ voter.min_voting_power }}% &nbsp; Max age: {{ voter.max_post_age_minutes }}m &nbsp;
+            {{ voter.fanbase_count }} authors
+        </p>
+    </div>
+    <div class="actions">
+        <form method="post" action="/ui/bot/voters/{{ voter.id }}/start"><button class="outline">Start Engine</button></form>
+        <form method="post" action="/ui/bot/voters/{{ voter.id }}/stop"><button class="outline secondary">Stop</button></form>
+        <form method="post" action="/ui/bot/voters/{{ voter.id }}/reload"><button class="outline">Reload Fanbase</button></form>
+    </div>
+</div>
+
+{% if flash %}
+<div class="flash {% if flash_error %}flash-error{% endif %}">{{ flash }}</div>
+{% endif %}
+
+<!-- Live blockchain account data -->
+<article>
+    <div id="account-info"
+         hx-get="/ui/partials/account-info/{{ voter.username }}"
+         hx-trigger="load, every 30s"
+         hx-swap="innerHTML">
+        <p aria-busy="true">Loading account data from blockchain...</p>
+    </div>
+</article>
+
+<!-- Edit voter settings -->
+<details>
+    <summary>Voter Settings</summary>
+    <form method="post" action="/ui/voters/{{ voter.id }}/edit">
+        <div class="grid">
+            <label>Min Voting Power %
+                <input name="min_voting_power" type="number" step="0.1" value="{{ voter.min_voting_power }}">
+            </label>
+            <label>Max Post Age (min)
+                <input name="max_post_age_minutes" type="number" step="0.1" value="{{ voter.max_post_age_minutes }}">
+            </label>
+            <label>Enabled
+                <select name="enabled">
+                    <option value="true" {% if voter.enabled %}selected{% endif %}>Yes</option>
+                    <option value="false" {% if not voter.enabled %}selected{% endif %}>No</option>
+                </select>
+            </label>
+        </div>
+        <label>New Posting Key (leave blank to keep current)
+            <input name="posting_key" type="password" placeholder="5K...">
+        </label>
+        <button type="submit">Save Settings</button>
+    </form>
+</details>
+
+<!-- Fanbase table -->
+<article>
+    <header>
+        <div class="voter-header">
+            <strong>Fanbase ({{ fanbase|length }} authors)</strong>
+            <button onclick="document.getElementById('add-author-dialog').showModal()">+ Add Author</button>
+        </div>
+    </header>
+
+    {% if fanbase %}
+    <div style="overflow-x:auto">
+    <table>
+        <thead>
+            <tr>
+                <th>Author</th>
+                <th>Vote %</th>
+                <th>Delay (min)</th>
+                <th>Daily Limit</th>
+                <th>Comment</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for e in fanbase %}
+            <tr>
+                <td><strong>@{{ e.author }}</strong></td>
+                <td>{{ e.vote_percentage }}%</td>
+                <td>{{ e.post_delay_minutes }}</td>
+                <td>{{ e.daily_vote_limit }}</td>
+                <td>{% if e.add_comment %}Yes{% else %}No{% endif %}</td>
+                <td>
+                    {% if e.enabled %}<span class="badge badge-green">on</span>{% else %}<span class="badge badge-red">off</span>{% endif %}
+                </td>
+                <td class="actions">
+                    <button class="outline" style="padding:0.2rem 0.5rem;font-size:0.8rem"
+                        onclick="openEditAuthor({{ e.id }}, '{{ e.author }}', {{ e.vote_percentage }}, {{ e.post_delay_minutes }}, {{ e.daily_vote_limit }}, {{ 'true' if e.add_comment else 'false' }}, '{{ e.comment_text }}', {{ 'true' if e.enabled else 'false' }})">
+                        Edit
+                    </button>
+                    <form method="post" action="/ui/voters/{{ voter.id }}/fanbase/{{ e.id }}/delete"
+                          onsubmit="return confirm('Remove @{{ e.author }}?')">
+                        <button class="outline secondary" style="padding:0.2rem 0.5rem;font-size:0.8rem">Del</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p>No authors in fanbase. Add some!</p>
+    {% endif %}
+</article>
+
+<!-- Add author dialog -->
+<dialog id="add-author-dialog">
+    <article>
+        <header>
+            <button aria-label="Close" rel="prev" onclick="this.closest('dialog').close()"></button>
+            <h3>Add Author to Fanbase</h3>
+        </header>
+        <form method="post" action="/ui/voters/{{ voter.id }}/fanbase/add">
+            <label>Author username
+                <input name="author" required placeholder="e.g. steemcurator01">
+            </label>
+            <div class="grid">
+                <label>Vote %
+                    <input name="vote_percentage" type="number" step="0.1" value="10" min="0.1" max="100" required>
+                </label>
+                <label>Delay (min)
+                    <input name="post_delay_minutes" type="number" step="0.1" value="4" min="0" required>
+                </label>
+                <label>Daily limit
+                    <input name="daily_vote_limit" type="number" value="1" min="1" required>
+                </label>
+            </div>
+            <fieldset>
+                <label><input type="checkbox" name="add_comment" value="true"> Add comment</label>
+            </fieldset>
+            <label>Comment text
+                <input name="comment_text" placeholder="Nice post!">
+            </label>
+            <button type="submit">Add Author</button>
+        </form>
+    </article>
+</dialog>
+
+<!-- Edit author dialog -->
+<dialog id="edit-author-dialog">
+    <article>
+        <header>
+            <button aria-label="Close" rel="prev" onclick="this.closest('dialog').close()"></button>
+            <h3>Edit Author: <span id="edit-author-name"></span></h3>
+        </header>
+        <form method="post" id="edit-author-form">
+            <div class="grid">
+                <label>Vote %
+                    <input name="vote_percentage" id="edit-vote-pct" type="number" step="0.1" min="0.1" max="100">
+                </label>
+                <label>Delay (min)
+                    <input name="post_delay_minutes" id="edit-delay" type="number" step="0.1" min="0">
+                </label>
+                <label>Daily limit
+                    <input name="daily_vote_limit" id="edit-limit" type="number" min="1">
+                </label>
+            </div>
+            <fieldset>
+                <label><input type="checkbox" name="add_comment" id="edit-comment-check" value="true"> Add comment</label>
+            </fieldset>
+            <label>Comment text
+                <input name="comment_text" id="edit-comment-text">
+            </label>
+            <label>Enabled
+                <select name="enabled" id="edit-enabled">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </label>
+            <button type="submit">Save</button>
+        </form>
+    </article>
+</dialog>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function openEditAuthor(entryId, author, votePct, delay, limit, addComment, commentText, enabled) {
+    document.getElementById('edit-author-name').textContent = '@' + author;
+    document.getElementById('edit-author-form').action = '/ui/voters/{{ voter.id }}/fanbase/' + entryId + '/edit';
+    document.getElementById('edit-vote-pct').value = votePct;
+    document.getElementById('edit-delay').value = delay;
+    document.getElementById('edit-limit').value = limit;
+    document.getElementById('edit-comment-check').checked = addComment;
+    document.getElementById('edit-comment-text').value = commentText;
+    document.getElementById('edit-enabled').value = enabled ? 'true' : 'false';
+    document.getElementById('edit-author-dialog').showModal();
+}
+</script>
+{% endblock %}

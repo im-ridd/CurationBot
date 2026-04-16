@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Trails — CurationBot{% endblock %}
+
+{% block content %}
+<h1>Trail Rules</h1>
+
+{% if flash %}
+<div class="flash {% if flash_error %}flash-error{% endif %}">{{ flash }}</div>
+{% endif %}
+
+<!-- Summary stats -->
+<div class="grid">
+    <article class="stat-card">
+        <h2>{{ trails|length }}</h2>
+        <p>Trail Rules</p>
+    </article>
+    <article class="stat-card">
+        <h2>{{ trails|selectattr('enabled')|list|length }}</h2>
+        <p>Active</p>
+    </article>
+    <article class="stat-card">
+        <h2>{{ voters|length }}</h2>
+        <p>Voter Accounts</p>
+    </article>
+</div>
+
+<!-- Trail Engines Runtime -->
+<article>
+    <header>
+        <div class="voter-header">
+            <strong>Trail Engines</strong>
+            <div class="actions">
+                <form method="post" action="/ui/bot/trails/start-all"><button class="outline">Start All Trails</button></form>
+            </div>
+        </div>
+    </header>
+    <div id="trail-runtime" hx-get="/ui/partials/trail-status" hx-trigger="load, every 10s" hx-swap="innerHTML">
+        <p aria-busy="true">Loading engine status...</p>
+    </div>
+</article>
+
+<!-- Configured Rules -->
+<article>
+    <header>
+        <div class="voter-header">
+            <strong>Configured Rules</strong>
+            <button onclick="document.getElementById('add-trail-dialog').showModal()">+ Add Trail</button>
+        </div>
+    </header>
+
+    {% if trails %}
+    <div style="overflow-x:auto">
+    <table>
+        <thead>
+            <tr>
+                <th>Follower</th>
+                <th>Leader</th>
+                <th>Weight Scale</th>
+                <th>Max Weight</th>
+                <th>Delay (s)</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for t in trails %}
+            <tr>
+                <td><strong>@{{ t.follower_name }}</strong></td>
+                <td><strong>@{{ t.leader_username }}</strong></td>
+                <td>{{ t.weight_scale }}x</td>
+                <td>{{ t.max_weight }}%</td>
+                <td>{{ t.delay_seconds }}</td>
+                <td>
+                    {% if t.enabled %}<span class="badge badge-green">on</span>{% else %}<span class="badge badge-red">off</span>{% endif %}
+                </td>
+                <td class="actions">
+                    <button class="outline" style="padding:0.2rem 0.5rem;font-size:0.8rem"
+                        onclick="openEditTrail({{ t.id }}, '{{ t.follower_name }}', '{{ t.leader_username }}', {{ t.weight_scale }}, {{ t.max_weight }}, {{ t.delay_seconds }}, {{ 'true' if t.enabled else 'false' }})">
+                        Edit
+                    </button>
+                    <form method="post" action="/ui/trails/{{ t.id }}/delete"
+                          onsubmit="return confirm('Delete trail @{{ t.follower_name }} → @{{ t.leader_username }}?')">
+                        <button class="outline secondary" style="padding:0.2rem 0.5rem;font-size:0.8rem">Del</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p>No trail rules configured. Click <strong>+ Add Trail</strong> to get started.</p>
+    {% endif %}
+</article>
+
+<!-- Add trail dialog -->
+<dialog id="add-trail-dialog">
+    <article>
+        <header>
+            <button aria-label="Close" rel="prev" onclick="this.closest('dialog').close()"></button>
+            <h3>Add Trail Rule</h3>
+        </header>
+        <form method="post" action="/ui/trails/add">
+            <label>Follower (voter account)
+                <select name="follower_id" required>
+                    {% for v in voters %}
+                    <option value="{{ v.id }}">@{{ v.username }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Leader username (to follow)
+                <input name="leader_username" required placeholder="e.g. steemcurator01">
+            </label>
+            <div class="grid">
+                <label>Weight scale
+                    <input name="weight_scale" type="number" step="0.1" value="1.0" min="0.1">
+                </label>
+                <label>Max weight %
+                    <input name="max_weight" type="number" step="0.1" value="100" min="0.1" max="100">
+                </label>
+                <label>Delay (seconds)
+                    <input name="delay_seconds" type="number" value="0" min="0">
+                </label>
+            </div>
+            <button type="submit">Create Trail</button>
+        </form>
+    </article>
+</dialog>
+
+<!-- Edit trail dialog -->
+<dialog id="edit-trail-dialog">
+    <article>
+        <header>
+            <button aria-label="Close" rel="prev" onclick="this.closest('dialog').close()"></button>
+            <h3>Edit Trail: <span id="edit-trail-label"></span></h3>
+        </header>
+        <form method="post" id="edit-trail-form">
+            <div class="grid">
+                <label>Weight scale
+                    <input name="weight_scale" id="et-scale" type="number" step="0.1" min="0.1">
+                </label>
+                <label>Max weight %
+                    <input name="max_weight" id="et-max" type="number" step="0.1" min="0.1" max="100">
+                </label>
+                <label>Delay (seconds)
+                    <input name="delay_seconds" id="et-delay" type="number" min="0">
+                </label>
+            </div>
+            <label>Enabled
+                <select name="enabled" id="et-enabled">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </label>
+            <button type="submit">Save</button>
+        </form>
+    </article>
+</dialog>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function openEditTrail(id, follower, leader, scale, max, delay, enabled) {
+    document.getElementById('edit-trail-label').textContent = '@' + follower + ' → @' + leader;
+    document.getElementById('edit-trail-form').action = '/ui/trails/' + id + '/edit';
+    document.getElementById('et-scale').value = scale;
+    document.getElementById('et-max').value = max;
+    document.getElementById('et-delay').value = delay;
+    document.getElementById('et-enabled').value = enabled ? 'true' : 'false';
+    document.getElementById('edit-trail-dialog').showModal();
+}
+</script>
+{% endblock %}

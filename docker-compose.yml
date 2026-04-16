@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  curation-bot:
+    build: .
+    container_name: curation-bot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - bot-data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:////app/data/curation_bot.db
+      - API_HOST=0.0.0.0
+
+volumes:
+  bot-data:

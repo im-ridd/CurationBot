@@ -1,0 +1,37 @@
+<!-- HTMX partial: single account info for voter detail page -->
+{% if acc.ok %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+    <strong style="font-size:1.2rem">@{{ acc.username }}</strong>
+    <span class="badge {% if acc.vp >= 80 %}badge-green{% elif acc.vp >= 50 %}badge-yellow{% else %}badge-red{% endif %}" style="font-size:1rem;padding:0.3rem 0.8rem">
+        VP {{ acc.vp }}%
+    </span>
+</div>
+<div class="vp-bar-track" style="height:10px;margin-bottom:1rem">
+    <div class="vp-bar-fill {% if acc.vp >= 80 %}vp-fill-green{% elif acc.vp >= 50 %}vp-fill-yellow{% else %}vp-fill-red{% endif %}"
+         style="width:{{ acc.vp }}%;height:10px"></div>
+</div>
+<div class="account-grid" style="grid-template-columns:repeat(5,1fr)">
+    <div class="account-stat">
+        <span class="account-stat-label">Steem Power</span>
+        <span class="account-stat-value" style="font-size:1.3rem">{{ "{:,.0f}".format(acc.sp) }} SP</span>
+    </div>
+    <div class="account-stat">
+        <span class="account-stat-label">Reputation</span>
+        <span class="account-stat-value" style="font-size:1.3rem">{{ acc.reputation }}</span>
+    </div>
+    <div class="account-stat">
+        <span class="account-stat-label">Resource Credits</span>
+        <span class="account-stat-value" style="font-size:1.3rem">{{ acc.rc_pct }}%</span>
+    </div>
+    <div class="account-stat">
+        <span class="account-stat-label">STEEM</span>
+        <span class="account-stat-value" style="font-size:1.3rem">{{ acc.balance_steem }}</span>
+    </div>
+    <div class="account-stat">
+        <span class="account-stat-label">SBD</span>
+        <span class="account-stat-value" style="font-size:1.3rem">{{ acc.balance_sbd }}</span>
+    </div>
+</div>
+{% else %}
+<p style="color:var(--pico-del-color)">Failed to load blockchain data for @{{ acc.username }}</p>
+{% endif %}

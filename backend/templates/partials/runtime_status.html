@@ -1,0 +1,76 @@
+<!-- HTMX partial: runtime status for dashboard -->
+{% if curation or trails %}
+<div class="grid">
+    {% for e in curation %}
+    <div class="engine-card">
+        <div class="engine-card-header">
+            <strong style="font-size:1.05rem">@{{ e.voter }}</strong>
+            <span class="badge {% if e.running %}badge-green{% else %}badge-red{% endif %}">
+                {% if e.running %}running{% else %}stopped{% endif %}
+            </span>
+        </div>
+        <div class="engine-card-type">Curation Engine</div>
+        <div class="account-grid">
+            <div class="account-stat">
+                <span class="account-stat-label">Authors</span>
+                <span class="account-stat-value engine-stat">{{ e.authors_count }}</span>
+            </div>
+            <div class="account-stat">
+                <span class="account-stat-label">Checked</span>
+                <span class="account-stat-value engine-stat">{{ e.posts_checked }}</span>
+            </div>
+            <div class="account-stat">
+                <span class="account-stat-label">Voted</span>
+                <span class="account-stat-value engine-stat">{{ e.votes_made }}</span>
+            </div>
+            <div class="account-stat">
+                <span class="account-stat-label">Pending</span>
+                <span class="account-stat-value engine-stat">{{ e.pending_posts }}</span>
+            </div>
+        </div>
+        {% if e.pending_details %}
+        <details style="font-size:0.85rem">
+            <summary>Pending posts</summary>
+            <ul style="margin:0.3rem 0">
+                {% for p in e.pending_details %}
+                <li>@{{ p.author }} — {{ p.title }} <small>({{ p.vote_time }})</small></li>
+                {% endfor %}
+            </ul>
+        </details>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% for t in trails %}
+    <div class="engine-card">
+        <div class="engine-card-header">
+            <strong style="font-size:1.05rem">@{{ t.voter }}</strong>
+            <span class="badge {% if t.running %}badge-green{% else %}badge-red{% endif %}">
+                {% if t.running %}running{% else %}stopped{% endif %}
+            </span>
+        </div>
+        <div class="engine-card-type">Trail Engine</div>
+        <div class="account-grid">
+            <div class="account-stat">
+                <span class="account-stat-label">Leaders</span>
+                <span class="account-stat-value engine-stat">{{ t.leaders_count }}</span>
+            </div>
+            <div class="account-stat">
+                <span class="account-stat-label">Replicated</span>
+                <span class="account-stat-value engine-stat">{{ t.votes_replicated }}</span>
+            </div>
+            <div class="account-stat">
+                <span class="account-stat-label">Ops Scanned</span>
+                <span class="account-stat-value engine-stat">{{ t.ops_scanned }}</span>
+            </div>
+        </div>
+        {% if t.leaders %}
+        <p style="margin:0;font-size:0.8rem;color:var(--pico-muted-color)">
+            Following: {% for l in t.leaders %}@{{ l }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:var(--pico-muted-color);text-align:center">No engines running. Use <strong>Start All</strong> or start individual voters.</p>
+{% endif %}

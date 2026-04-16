@@ -1,0 +1,50 @@
+<!-- HTMX partial: live blockchain account cards for all voters -->
+{% if accounts %}
+<div class="grid">
+{% for acc in accounts %}
+    <article style="padding:1rem; position:relative">
+        {% if acc.ok %}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+            <strong style="font-size:1.1rem">@{{ acc.username }}</strong>
+            <span class="badge {% if acc.vp >= 80 %}badge-green{% elif acc.vp >= 50 %}badge-yellow{% else %}badge-red{% endif %}">
+                VP {{ acc.vp }}%
+            </span>
+        </div>
+        <div class="vp-bar-track">
+            <div class="vp-bar-fill {% if acc.vp >= 80 %}vp-fill-green{% elif acc.vp >= 50 %}vp-fill-yellow{% else %}vp-fill-red{% endif %}"
+                 style="width:{{ acc.vp }}%"></div>
+        </div>
+        <div class="account-grid">
+            <div class="account-stat">
+                <span class="account-stat-label">SP</span>
+                <span class="account-stat-value">{{ "{:,.0f}".format(acc.sp) }}</span>
+            </div>
+            <div class="account-stat">
+                <span class="account-stat-label">Rep</span>
+                <span class="account-stat-value">{{ acc.reputation }}</span>
+            </div>
+            <div class="account-stat">
+                <span class="account-stat-label">RC</span>
+                <span class="account-stat-value">{{ acc.rc_pct }}%</span>
+            </div>
+            <div class="account-stat">
+                <span class="account-stat-label">STEEM</span>
+                <span class="account-stat-value">{{ acc.balance_steem }}</span>
+            </div>
+            <div class="account-stat">
+                <span class="account-stat-label">SBD</span>
+                <span class="account-stat-value">{{ acc.balance_sbd }}</span>
+            </div>
+        </div>
+        {% else %}
+        <div>
+            <strong>@{{ acc.username }}</strong>
+            <p style="color:var(--pico-del-color);margin:0.5rem 0 0">Failed to load account data</p>
+        </div>
+        {% endif %}
+    </article>
+{% endfor %}
+</div>
+{% else %}
+<p>No voter accounts configured.</p>
+{% endif %}

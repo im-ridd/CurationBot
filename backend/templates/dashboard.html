@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — CurationBot{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+<!-- Global stats bar -->
+<div class="grid">
+    <article class="stat-card">
+        <h2>{{ stats.voters.total }}</h2>
+        <p>Voters ({{ stats.voters.enabled }} active)</p>
+    </article>
+    <article class="stat-card">
+        <h2>{{ stats.fanbase_entries.total }}</h2>
+        <p>Fanbase ({{ stats.fanbase_entries.enabled }} active)</p>
+    </article>
+    <article class="stat-card">
+        <h2>{{ stats.trail_rules.total }}</h2>
+        <p>Trails ({{ stats.trail_rules.enabled }} active)</p>
+    </article>
+</div>
+
+<!-- Live account info from blockchain (loaded async via HTMX) -->
+<p class="section-title">Blockchain Account Status</p>
+<div id="account-cards"
+     hx-get="/ui/partials/account-cards"
+     hx-trigger="load, every 60s"
+     hx-swap="innerHTML">
+    <p aria-busy="true">Loading account data from blockchain...</p>
+</div>
+
+<!-- Bot controls + Engine status -->
+<article>
+    <header>
+        <div class="voter-header">
+            <strong>Engines</strong>
+            <div class="actions">
+                <form method="post" action="/ui/bot/start-all"><button class="outline">Start All Curation</button></form>
+                <form method="post" action="/ui/bot/stop-all"><button class="outline secondary">Stop All</button></form>
+                <form method="post" action="/ui/bot/trails/start-all"><button class="outline">Start All Trails</button></form>
+            </div>
+        </div>
+    </header>
+    <div id="runtime-status" hx-get="/ui/partials/runtime-status" hx-trigger="load, every 10s" hx-swap="innerHTML">
+        <p aria-busy="true">Loading runtime status...</p>
+    </div>
+</article>
+
+<!-- Live Activity Feed -->
+<article>
+    <header>
+        <div class="voter-header">
+            <strong>Live Activity</strong>
+            <small style="color:var(--pico-muted-color)">auto-refresh 5s</small>
+        </div>
+    </header>
+    <div id="activity-feed" hx-get="/ui/partials/activity" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <p aria-busy="true">Loading activity...</p>
+    </div>
+</article>
+
+<!-- Voters list -->
+<article>
+    <header>
+        <div class="voter-header">
+            <strong>Voter Accounts</strong>
+            <button onclick="document.getElementById('add-voter-dialog').showModal()">+ Add Voter</button>
+        </div>
+    </header>
+    {% if voters %}
+    <div style="overflow-x:auto">
+    <table>
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Min VP</th>
+                <th>Max Age</th>
+                <th>Fanbase</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for v in voters %}
+            <tr>
+                <td><a href="/ui/voters/{{ v.id }}"><strong>@{{ v.username }}</strong></a></td>
+                <td>{{ v.min_voting_power }}%</td>
+                <td>{{ v.max_post_age_minutes }}m</td>
+                <td>{{ v.fanbase_count }}</td>
+                <td>
+                    {% if v.enabled %}
+                        <span class="badge badge-green">enabled</span>
+                    {% else %}
+                        <span class="badge badge-red">disabled</span>
+                    {% endif %}
+                </td>
+                <td class="actions">
+                    <a href="/ui/voters/{{ v.id }}" role="button" class="outline" style="padding:0.3rem 0.7rem;font-size:0.85rem">Manage</a>
+                    <form method="post" action="/ui/bot/voters/{{ v.id }}/start"><button class="outline" style="padding:0.3rem 0.7rem;font-size:0.85rem">Start</button></form>
+                    <form method="post" action="/ui/bot/voters/{{ v.id }}/stop"><button class="outline secondary" style="padding:0.3rem 0.7rem;font-size:0.85rem">Stop</button></form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p>No voters configured. Add one to get started.</p>
+    {% endif %}
+</article>
+
+<!-- Add voter dialog -->
+<dialog id="add-voter-dialog">
+    <article>
+        <header>
+            <button aria-label="Close" rel="prev" onclick="this.closest('dialog').close()"></button>
+            <h3>Add Voter Account</h3>
+        </header>
+        <form method="post" action="/ui/voters/add">
+            <label>Username
+                <input name="username" required placeholder="e.g. cur8">
+            </label>
+            <label>Posting Key (WIF)
+                <input name="posting_key" type="password" required placeholder="5K...">
+            </label>
+            <div class="grid">
+                <label>Min Voting Power %
+                    <input name="min_voting_power" type="number" step="0.1" value="80">
+                </label>
+                <label>Max Post Age (min)
+                    <input name="max_post_age_minutes" type="number" step="0.1" value="5">
+                </label>
+            </div>
+            <button type="submit">Create Voter</button>
+        </form>
+    </article>
+</dialog>
+{% endblock %}

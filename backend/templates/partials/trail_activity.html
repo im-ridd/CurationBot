@@ -1,0 +1,39 @@
+<!-- HTMX partial: trail-only activity feed -->
+{% if events %}
+<div style="max-height:300px;overflow-y:auto;font-size:0.85rem;font-family:monospace">
+    <table style="width:100%">
+        <thead>
+            <tr>
+                <th style="width:60px">Time</th>
+                <th style="width:60px">Follower</th>
+                <th style="width:90px">Event</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for ev in events %}
+            <tr style="{% if ev.event == 'voted' %}color:#b7e4c7{% elif ev.event == 'leader_vote' %}color:#a8dadc{% endif %}">
+                <td>{{ ev.ts }}</td>
+                <td>@{{ ev.source }}</td>
+                <td>
+                    {% if ev.event == "voted" %}
+                        <span class="badge badge-green">VOTED</span>
+                    {% elif ev.event == "leader_vote" %}
+                        <span class="badge badge-blue">LEADER</span>
+                    {% elif ev.event == "started" %}
+                        <span class="badge badge-green">START</span>
+                    {% elif ev.event == "stopped" %}
+                        <span class="badge badge-red">STOP</span>
+                    {% else %}
+                        <span class="badge badge-blue">{{ ev.event|upper }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ ev.detail }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p style="color:var(--pico-muted-color);text-align:center">No trail activity yet. Start a trail engine to see events.</p>
+{% endif %}

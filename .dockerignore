@@ -1,0 +1,10 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+*.db
+.env
+curation_bot.py
+sniper_biz.py
+*.md
+.vscode
