@@ -62,7 +62,14 @@
     <header>
         <div class="voter-header">
             <strong>Fanbase ({{ fanbase|length }} authors)</strong>
-            <button onclick="document.getElementById('add-author-dialog').showModal()">+ Add Author</button>
+            <div class="actions">
+                <a href="/ui/voters/{{ voter.id }}/fanbase/export" role="button" class="outline" style="padding:0.3rem 0.7rem;font-size:0.85rem">Export JSON</a>
+                <button class="outline" style="padding:0.3rem 0.7rem;font-size:0.85rem" onclick="document.getElementById('import-file').click()">Import JSON</button>
+                <form method="post" action="/ui/voters/{{ voter.id }}/fanbase/import" enctype="multipart/form-data" id="import-form" style="display:none">
+                    <input type="file" name="file" id="import-file" accept=".json" onchange="document.getElementById('import-form').submit()">
+                </form>
+                <button onclick="document.getElementById('add-author-dialog').showModal()">+ Add Author</button>
+            </div>
         </div>
     </header>
 

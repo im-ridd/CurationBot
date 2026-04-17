@@ -7,6 +7,7 @@ from backend.database import engine
 from backend.models import Base
 from backend.routers import voters, fanbase, trails, status, bot_control
 from backend.routers.frontend import router as frontend_router
+from backend.auth import AuthMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +33,9 @@ app.include_router(bot_control.router)
 
 # Frontend
 app.include_router(frontend_router)
+
+# Auth middleware (after routers so login route is registered)
+app.add_middleware(AuthMiddleware)
 
 
 @app.get("/", tags=["root"])

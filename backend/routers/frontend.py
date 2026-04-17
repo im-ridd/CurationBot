@@ -1,11 +1,12 @@
 """Frontend router — serves HTML pages via Jinja2 templates."""
 
+import json
 import logging
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Form, Request, UploadFile, File
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -31,6 +32,35 @@ def _mgr() -> BotManager:
 
 def _encrypt_key(plain_key: str) -> str:
     return get_fernet().encrypt(plain_key.encode()).decode()
+
+
+# ────────────────────── Auth ──────────────────────
+
+
+@router.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    error = request.query_params.get("error")
+    return templates.TemplateResponse(request, "login.html", {"error": error})
+
+
+@router.post("/login")
+def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+    from backend.config import ADMIN_USER, ADMIN_PASS
+    from backend.auth import make_auth_token
+    import hmac
+    if hmac.compare_digest(username, ADMIN_USER) and hmac.compare_digest(password, ADMIN_PASS):
+        token = make_auth_token(username)
+        response = RedirectResponse("/ui", status_code=303)
+        response.set_cookie("session", token, httponly=True, samesite="lax", max_age=60*60*24*7)
+        return response
+    return RedirectResponse("/ui/login?error=1", status_code=303)
+
+
+@router.get("/logout")
+def logout():
+    response = RedirectResponse("/ui/login", status_code=303)
+    response.delete_cookie("session")
+    return response
 
 
 # ────────────────────── Pages ──────────────────────
@@ -358,6 +388,83 @@ def form_delete_fanbase(voter_id: int, entry_id: int, db: Session = Depends(get_
         db.delete(entry)
         db.commit()
     return RedirectResponse(f"/ui/voters/{voter_id}?flash=Author+removed", status_code=303)
+
+
+@router.get("/voters/{voter_id}/fanbase/export")
+def export_fanbase(voter_id: int, db: Session = Depends(get_db)):
+    """Download fanbase as JSON file."""
+    voter = db.query(VoterAccount).filter(VoterAccount.id == voter_id).first()
+    if not voter:
+        return RedirectResponse("/ui", status_code=303)
+    entries = (
+        db.query(FanbaseEntry)
+        .filter(FanbaseEntry.voter_id == voter_id)
+        .order_by(FanbaseEntry.author)
+        .all()
+    )
+    data = [{
+        "author": e.author,
+        "vote_percentage": e.vote_percentage,
+        "post_delay_minutes": e.post_delay_minutes,
+        "daily_vote_limit": e.daily_vote_limit,
+        "add_comment": e.add_comment,
+        "comment_text": e.comment_text,
+        "enabled": e.enabled,
+    } for e in entries]
+    return JSONResponse(
+        content=data,
+        headers={"Content-Disposition": f'attachment; filename="fanbase_{voter.username}.json"'},
+    )
+
+
+@router.post("/voters/{voter_id}/fanbase/import")
+async def import_fanbase(voter_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Import fanbase from JSON file. Skips duplicates, adds new entries."""
+    voter = db.query(VoterAccount).filter(VoterAccount.id == voter_id).first()
+    if not voter:
+        return RedirectResponse("/ui", status_code=303)
+    try:
+        content = await file.read()
+        entries = json.loads(content)
+        if not isinstance(entries, list):
+            return RedirectResponse(
+                f"/ui/voters/{voter_id}?flash=Invalid+file+format&error=1", status_code=303,
+            )
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return RedirectResponse(
+            f"/ui/voters/{voter_id}?flash=Invalid+JSON+file&error=1", status_code=303,
+        )
+
+    added = 0
+    skipped = 0
+    for item in entries:
+        author = item.get("author", "").strip().lower()
+        if not author:
+            continue
+        existing = (
+            db.query(FanbaseEntry)
+            .filter(FanbaseEntry.voter_id == voter_id, FanbaseEntry.author == author)
+            .first()
+        )
+        if existing:
+            skipped += 1
+            continue
+        entry = FanbaseEntry(
+            voter_id=voter_id,
+            author=author,
+            vote_percentage=float(item.get("vote_percentage", 10.0)),
+            post_delay_minutes=float(item.get("post_delay_minutes", 4.0)),
+            daily_vote_limit=int(item.get("daily_vote_limit", 1)),
+            add_comment=bool(item.get("add_comment", False)),
+            comment_text=str(item.get("comment_text", "")),
+            enabled=bool(item.get("enabled", True)),
+        )
+        db.add(entry)
+        added += 1
+    db.commit()
+    return RedirectResponse(
+        f"/ui/voters/{voter_id}?flash=Imported+{added}+authors+({skipped}+skipped)", status_code=303,
+    )
 
 
 # ────────────────────── Form actions: Trails ──────────────────────

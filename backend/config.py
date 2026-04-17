@@ -30,3 +30,8 @@ def get_fernet() -> Fernet:
 # --- API ---
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))
+
+# --- Auth ---
+ADMIN_USER = os.getenv("ADMIN_USER", "admin")
+ADMIN_PASS = os.getenv("ADMIN_PASS", "")
+SECRET_KEY = os.getenv("SECRET_KEY", FERNET_KEY or "change-me")

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login — CurationBot</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        body { display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .login-card { width: 100%; max-width: 380px; }
+        .login-card h2 { text-align: center; margin-bottom: 0.5rem; }
+        .login-card p { text-align: center; color: var(--pico-muted-color); margin-bottom: 1.5rem; }
+        .error-msg { color: var(--pico-del-color); text-align: center; font-size: 0.9rem; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+    <article class="login-card">
+        <h2>🤖 CurationBot</h2>
+        <p>Enter credentials to continue</p>
+        {% if error %}
+        <div class="error-msg">Invalid username or password</div>
+        {% endif %}
+        <form method="post" action="/ui/login">
+            <label>Username
+                <input name="username" type="text" required autofocus>
+            </label>
+            <label>Password
+                <input name="password" type="password" required>
+            </label>
+            <button type="submit">Login</button>
+        </form>
+    </article>
+</body>
+</html>
