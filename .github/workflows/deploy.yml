@@ -17,6 +17,13 @@ jobs:
           script: |
             cd /home/curation-bot
             git pull origin main
-            docker-compose build --no-cache
-            docker-compose up -d
+            docker build -t curation-bot .
+            docker rm -f curation-bot 2>/dev/null
+            docker run -d --name curation-bot --restart unless-stopped \
+              -p 8001:8001 \
+              --env-file .env \
+              -e DATABASE_URL=sqlite:////app/data/curation_bot.db \
+              -e API_HOST=0.0.0.0 \
+              -v curation-bot-data:/app/data \
+              curation-bot
             docker image prune -f
