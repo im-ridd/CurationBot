@@ -297,9 +297,13 @@ class TrailEngine:
 
             if self.client.has_already_voted(post, self.voter_username):
                 logger.info(f"[trail-{self.voter_username}] Already voted on {identifier}")
+                self._log_activity("voted", detail=f"già votato: {identifier}")
                 return
 
             vp = self.client.get_voting_power(self.voter_username)
+            if vp is None:
+                logger.warning(f"[trail-{self.voter_username}] Could not fetch VP, skipping vote")
+                return
             if vp < 50.0:  # safety floor for trail votes
                 logger.warning(f"[trail-{self.voter_username}] VP too low ({vp:.1f}%), skipping")
                 return
@@ -313,6 +317,7 @@ class TrailEngine:
                     time.sleep(wait)
                 self._last_vote_ts = time.time()  # reserve this slot
             # Lock released — upvote is made outside it
+            logger.info(f"[trail-{self.voter_username}] Casting vote as @{self.voter_username} on {identifier}")
             success = self.client.upvote(post, weight=weight, voter=self.voter_username)
 
             if success:

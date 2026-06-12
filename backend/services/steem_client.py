@@ -160,6 +160,9 @@ class SteemClient:
                 if "Duplicate transaction" in err:
                     logger.warning(f"Duplicate-tx error for @{voter} on {post.authorperm} — vote likely went through")
                     return True
+                if "already voted" in err.lower() or "You have already voted" in err:
+                    logger.info(f"@{voter} already voted on {post.authorperm} — skipping")
+                    return False  # not an error, just no-op
                 if "STEEM_MIN_VOTE_INTERVAL" in err and attempt == 0:
                     logger.warning(f"Vote rate limit hit for @{voter}, retrying in 4s")
                     time.sleep(4)
