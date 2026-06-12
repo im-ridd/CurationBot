@@ -81,16 +81,32 @@ class SteemClient:
                 if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
                     self._rotate_node()
                     continue
+                # Fallback: try condenser_api.get_accounts (more widely supported)
+                try:
+                    raw = self.steem.rpc.get_accounts([username])
+                    if raw:
+                        return Account(raw[0], blockchain_instance=self.steem)
+                    return None
+                except Exception:
+                    pass
                 logger.error(f"Error fetching account @{username}: {e}")
                 return None
         logger.warning(f"All nodes failed for @{username} (get_account) — skipping this cycle")
         return None
 
+    def _raw_blog(self, author: str, limit: int):
+        """Fetch blog posts via condenser_api.get_discussions_by_blog (no find_accounts)."""
+        raw = self.steem.rpc.get_discussions_by_blog({"tag": author, "limit": limit})
+        if not raw:
+            return []
+        # Filter to only the author's own posts (not resteems)
+        return [Comment(entry, blockchain_instance=self.steem)
+                for entry in raw if entry.get("author") == author]
+
     def get_latest_post(self, author: str):
         for attempt in range(len(self._nodes)):
             try:
-                account = Account(author, blockchain_instance=self.steem)
-                posts = account.get_blog(limit=1)
+                posts = self._raw_blog(author, 1)
                 return posts[0] if posts else None
             except Exception as e:
                 err = str(e)
@@ -105,8 +121,7 @@ class SteemClient:
     def get_blog(self, author: str, limit: int = 5):
         for attempt in range(len(self._nodes)):
             try:
-                account = Account(author, blockchain_instance=self.steem)
-                return account.get_blog(limit=limit)
+                return self._raw_blog(author, limit)
             except Exception as e:
                 err = str(e)
                 if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
