@@ -2,7 +2,7 @@
 {% block title %}Trails — CurationBot{% endblock %}
 
 {% block content %}
-<h1>&#10149; Trail Dashboard</h1>
+<h1>Trail Dashboard</h1>
 
 {% if flash %}
 <div class="flash {% if flash_error %}flash-error{% endif %}">{{ flash }}</div>
@@ -123,7 +123,7 @@
             <small style="color:var(--pico-muted-color)">auto-refresh 5s</small>
         </div>
     </header>
-    <div id="trail-activity" hx-get="/ui/partials/trail-activity" hx-trigger="load, every 5s" hx-swap="innerHTML">
+    <div id="trail-activity" hx-get="/ui/partials/trail-activity" hx-trigger="load, every 5s" hx-swap="innerHTML show:no-scroll">
         <p aria-busy="true">Loading activity...</p>
     </div>
 </article>

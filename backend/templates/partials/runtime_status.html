@@ -16,8 +16,16 @@
                 <span class="account-stat-value engine-stat">{{ e.authors_count }}</span>
             </div>
             <div class="account-stat">
-                <span class="account-stat-label">Checked</span>
-                <span class="account-stat-value engine-stat">{{ e.posts_checked }}</span>
+                <span class="account-stat-label">Scan</span>
+                <span class="account-stat-value engine-stat">
+                    {% if e.last_scan_duration %}
+                        {% if e.last_scan_duration >= 60 %}
+                            {{ (e.last_scan_duration // 60)|int }}m {{ (e.last_scan_duration % 60)|int }}s
+                        {% else %}
+                            {{ e.last_scan_duration }}s
+                        {% endif %}
+                    {% else %}—{% endif %}
+                </span>
             </div>
             <div class="account-stat">
                 <span class="account-stat-label">Voted</span>

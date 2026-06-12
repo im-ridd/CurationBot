@@ -80,6 +80,7 @@ class CurationEngine:
 
         # Heartbeat updated every main-loop iteration; used by watchdog.
         self._last_activity_ts: float = 0.0
+        self._last_scan_duration: float = 0.0  # seconds for last full scan cycle
 
         # Parallel scan: how many authors to check concurrently.
         # 10 workers × ~5s avg per author = 130 authors in ~65s worst case.
@@ -222,6 +223,7 @@ class CurationEngine:
                         authors_snapshot = dict(self.authors)
 
                     # Submit all eligible authors in parallel
+                    scan_start = time.time()
                     futures = {}
                     for author_name, runtime in authors_snapshot.items():
                         if not self.running:
@@ -244,6 +246,7 @@ class CurationEngine:
                             logger.error(f"[{self.voter_username}] Error on @{author_name}: {e}")
 
                     self._log_status()
+                    self._last_scan_duration = time.time() - scan_start
                     time.sleep(self.interval_seconds)
                 except Exception as e:
                     logger.error(f"[{self.voter_username}] Main loop error: {e}")
@@ -365,15 +368,21 @@ class CurationEngine:
         # Competitor timing adjustment
         competitor_delay = self._analyze_competitor_timing(author)
         effective_delay = runtime.post_delay_minutes
+        timing_adjusted = False
         if competitor_delay is not None:
-            effective_delay = min(effective_delay, competitor_delay)
+            new_delay = min(effective_delay, competitor_delay)
+            if new_delay < effective_delay:
+                timing_adjusted = True
+                original_delay = effective_delay
+            effective_delay = new_delay
             logger.info(
                 f"[{self.voter_username}] Adjusted timing for @{author}: {effective_delay:.1f}m"
             )
 
         post_title = getattr(latest_post, 'title', '')[:60]
+        timing_note = f" · ⏱ {original_delay:.1f}m→{effective_delay:.1f}m" if timing_adjusted else ""
         logger.info(f"[{self.voter_username}] New post by @{author} (age {post_age:.1f}m)")
-        self._log_activity("new_post", author=author, detail=f"{post_title} (age {post_age:.1f}m)")
+        self._log_activity("new_post", author=author, detail=f"{post_title} (age {post_age:.1f}m){timing_note}")
 
         if post_age < effective_delay:
             vote_at = post_time.replace(tzinfo=None) + timedelta(minutes=effective_delay)
@@ -389,7 +398,7 @@ class CurationEngine:
             logger.info(
                 f"[{self.voter_username}] Queued @{author} — vote in {wait_min:.1f}m"
             )
-            self._log_activity("queued", author=author, detail=f"{post_title} — voting in {wait_min:.1f}m")
+            self._log_activity("queued", author=author, detail=f"{post_title} — voting in {wait_min:.1f}m{timing_note}")
         else:
             self._upvote_post(latest_post, author, runtime)
 
@@ -440,6 +449,7 @@ class CurationEngine:
             "posts_checked": self.posts_checked,
             "votes_made": votes_made,
             "pending_posts": len(pending),
+            "last_scan_duration": round(self._last_scan_duration),
             "pending_details": [
                 {
                     "author": p.author,

@@ -2,7 +2,7 @@
 {% block title %}Curation — CurationBot{% endblock %}
 
 {% block content %}
-<h1>&#9733; Curation Dashboard</h1>
+<h1>Curation Dashboard</h1>
 
 {% if flash %}
 <div class="flash {% if flash_error %}flash-error{% endif %}">{{ flash }}</div>
@@ -24,13 +24,15 @@
 </div>
 
 <!-- Live account info from blockchain (loaded async via HTMX) -->
-<p class="section-title">Blockchain Account Status</p>
-<div id="account-cards"
-     hx-get="/ui/partials/account-cards"
-     hx-trigger="load, every 60s"
-     hx-swap="innerHTML">
-    <p aria-busy="true">Loading account data from blockchain...</p>
-</div>
+<details>
+    <summary class="section-title" style="cursor:pointer;display:list-item">Blockchain Account Status</summary>
+    <div id="account-cards"
+         hx-get="/ui/partials/account-cards"
+         hx-trigger="intersect once, every 60s"
+         hx-swap="innerHTML show:no-scroll">
+        <p aria-busy="true">Loading account data from blockchain...</p>
+    </div>
+</details>
 
 <!-- Bot controls + Engine status -->
 <article>
@@ -56,7 +58,7 @@
             <small style="color:var(--pico-muted-color)">auto-refresh 5s</small>
         </div>
     </header>
-    <div id="activity-feed" hx-get="/ui/partials/activity" hx-trigger="load, every 5s" hx-swap="innerHTML">
+    <div id="activity-feed" hx-get="/ui/partials/activity" hx-trigger="load, every 5s" hx-swap="innerHTML show:no-scroll">
         <p aria-busy="true">Loading activity...</p>
     </div>
 </article>
