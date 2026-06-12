@@ -46,6 +46,8 @@ class SteemClient:
         "method_itr != api_itr",
         "Bad Cast",
         "Invalid cast",
+        "NoneType is not iterable",
+        "argument of type 'NoneType'",
     )
 
     def _is_bad_node_error(self, err: str) -> bool:
@@ -62,7 +64,12 @@ class SteemClient:
 
     def connect(self) -> bool:
         try:
-            self.steem = Steem(node=self._nodes, keys=[self._posting_key], timeout=30)
+            self.steem = Steem(
+                node=self._nodes,
+                keys=[self._posting_key],
+                timeout=30,
+                storekeys=False,  # avoid "table keys already exists" SQLite error
+            )
             logger.info("Connected to Steem nodes")
             return True
         except Exception as e:
@@ -136,11 +143,12 @@ class SteemClient:
         votes = post.get_votes()
         return any(v['voter'] == voter for v in votes)
 
-    def get_voting_power(self, username: str) -> float:
+    def get_voting_power(self, username: str) -> float | None:
+        """Returns None if the VP could not be fetched (node error), 0.0..100.0 otherwise."""
         account = self.get_account(username)
         if account:
             return account.get_voting_power()
-        return 0.0
+        return None
 
     def upvote(self, post, weight: float, voter: str) -> bool:
         for attempt in range(2):

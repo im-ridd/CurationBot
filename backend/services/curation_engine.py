@@ -303,6 +303,12 @@ class CurationEngine:
     def _upvote_post(self, post, author: str, runtime: AuthorRuntime) -> bool:
         try:
             vp = self.client.get_voting_power(self.voter_username)
+            if vp is None:
+                # Node error — can't determine VP, keep post in pending and retry next cycle
+                logger.warning(
+                    f"[{self.voter_username}] Could not fetch VP — deferring vote on @{author}"
+                )
+                return False
             if vp < self.min_voting_power:
                 logger.warning(
                     f"[{self.voter_username}] Low VP ({vp:.1f}%) — skipping @{author}"
