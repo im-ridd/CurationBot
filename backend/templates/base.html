@@ -147,5 +147,21 @@
         <small>CurationBot v2.0 &mdash; Multi-account Steem curation</small>
     </footer>
     {% block extra_scripts %}{% endblock %}
+    <script>
+        // Preserve scroll position of feed divs on HTMX partial refresh
+        const _savedScrolls = {};
+        document.addEventListener('htmx:beforeSwap', function(e) {
+            const el = e.target.querySelector('[data-scroll]');
+            if (el) _savedScrolls[e.target.id] = el.scrollTop;
+        });
+        document.addEventListener('htmx:afterSwap', function(e) {
+            const saved = _savedScrolls[e.target.id];
+            if (saved !== undefined) {
+                const el = e.target.querySelector('[data-scroll]');
+                if (el) el.scrollTop = saved;
+                delete _savedScrolls[e.target.id];
+            }
+        });
+    </script>
 </body>
 </html>
