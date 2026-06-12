@@ -67,8 +67,9 @@ class SteemClient:
             self.steem = Steem(
                 node=self._nodes,
                 keys=[self._posting_key],
-                timeout=30,
-                storekeys=False,  # avoid "table keys already exists" SQLite error
+                timeout=10,        # per-node socket timeout (10s × 6 nodes = 60s worst case)
+                num_retries=1,     # let OUR retry loop handle rotation, not beem's (default=100)
+                storekeys=False,   # avoid "table keys already exists" SQLite error
             )
             logger.info("Connected to Steem nodes")
             return True

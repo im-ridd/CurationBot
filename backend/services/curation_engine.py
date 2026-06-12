@@ -91,7 +91,7 @@ class CurationEngine:
         # 5 workers keeps connection pool pressure low while still scanning
         # 130 authors in ~40-60s under normal node conditions.
         self.SCAN_WORKERS = 5
-        self.AUTHOR_TIMEOUT = 30  # seconds per author before skip
+        self.AUTHOR_TIMEOUT = 90  # seconds per author before skip (10s/node × 6 nodes × some slack)
 
     def _log_activity(self, event: str, author: str = "", detail: str = "", level: str = "info"):
         with self._state_lock:
