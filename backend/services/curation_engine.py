@@ -88,8 +88,9 @@ class CurationEngine:
         self._last_scan_duration: float = 0.0  # seconds for last full scan cycle
 
         # Parallel scan: how many authors to check concurrently.
-        # 10 workers × ~5s avg per author = 130 authors in ~65s worst case.
-        self.SCAN_WORKERS = 10
+        # 5 workers keeps connection pool pressure low while still scanning
+        # 130 authors in ~40-60s under normal node conditions.
+        self.SCAN_WORKERS = 5
         self.AUTHOR_TIMEOUT = 30  # seconds per author before skip
 
     def _log_activity(self, event: str, author: str = "", detail: str = "", level: str = "info"):
@@ -336,6 +337,53 @@ class CurationEngine:
             logger.error(f"[{self.voter_username}] Competitor analysis error: {e}")
             return None
 
+    def _has_voted_in_last_18h_from_blog(self, author: str, daily_limit: int, blog: list) -> bool:
+        """Check vote history using an already-fetched blog list — no extra RPC.
+        active_votes is included in get_discussions_by_blog responses."""
+        try:
+            current_time = datetime.utcnow()
+            cutoff_time = current_time - timedelta(hours=18)
+            votes_in_period = 0
+            for post in blog:
+                post_time = post['created'].replace(tzinfo=None)
+                if post_time > cutoff_time:
+                    active_votes = post.get('active_votes', [])
+                    if any(v['voter'] == self.voter_username for v in active_votes):
+                        votes_in_period += 1
+            result = votes_in_period >= daily_limit
+            self._vote_history_cache[author] = (time.time(), result)
+            return result
+        except Exception as e:
+            logger.error(f"[{self.voter_username}] Error checking vote history for @{author}: {e}")
+            return False
+
+    def _competitor_delay_from_blog(self, author: str, blog: list, competitor: str = "karja") -> float | None:
+        """Analyze competitor timing using an already-fetched blog list — no extra RPC.
+        active_votes is included in get_discussions_by_blog responses."""
+        try:
+            if len(blog) > 1:
+                last_post = blog[1]
+                post_time = last_post['created'].replace(tzinfo=None)
+                active_votes = last_post.get('active_votes', [])
+                for vote in active_votes:
+                    if vote['voter'] == competitor:
+                        vote_time_raw = vote['time']
+                        if isinstance(vote_time_raw, datetime):
+                            vote_time = vote_time_raw.replace(tzinfo=None)
+                        else:
+                            vote_time = datetime.strptime(str(vote_time_raw), "%Y-%m-%dT%H:%M:%S")
+                        delay = (vote_time - post_time).total_seconds() / 60
+                        logger.info(
+                            f"[{self.voter_username}] {competitor} voted after {delay:.1f}m on @{author}"
+                        )
+                        if delay > 4:
+                            return delay - 0.25
+                        return None
+            return None
+        except Exception as e:
+            logger.error(f"[{self.voter_username}] Competitor analysis error: {e}")
+            return None
+
     def _upvote_post(self, post, author: str, runtime: AuthorRuntime) -> bool:
         try:
             vp = self.client.get_voting_power(self.voter_username)
@@ -382,13 +430,20 @@ class CurationEngine:
             return False
 
     def _check_author(self, author: str, runtime: AuthorRuntime):
-        if self._has_voted_in_last_18h(author, runtime.daily_vote_limit):
+        # Single RPC call: get_blog(limit=5) provides data for has_voted check,
+        # latest_post detection, and competitor timing — avoiding 3 separate calls.
+        cached = self._vote_history_cache.get(author)
+        if cached and time.time() - cached[0] < self._vote_history_ttl and cached[1]:
+            return  # voted recently, skip without any RPC
+
+        blog = self.client.get_blog(author, limit=5)
+        if not blog:
             return
 
-        latest_post = self.client.get_latest_post(author)
-        if not latest_post:
+        if self._has_voted_in_last_18h_from_blog(author, runtime.daily_vote_limit, blog):
             return
 
+        latest_post = blog[0]
         self.posts_checked += 1
         current_time = datetime.utcnow()
         post_time = latest_post['created']
@@ -403,8 +458,8 @@ class CurationEngine:
         if already_pending:
             return
 
-        # Competitor timing adjustment
-        competitor_delay = self._analyze_competitor_timing(author)
+        # Competitor timing — reuse already-fetched blog, no extra RPC
+        competitor_delay = self._competitor_delay_from_blog(author, blog)
         effective_delay = runtime.post_delay_minutes
         timing_adjusted = False
         if competitor_delay is not None:
@@ -413,9 +468,7 @@ class CurationEngine:
                 timing_adjusted = True
                 original_delay = effective_delay
             effective_delay = new_delay
-            logger.info(
-                f"[{self.voter_username}] Adjusted timing for @{author}: {effective_delay:.1f}m"
-            )
+            logger.info(f"[{self.voter_username}] Adjusted timing for @{author}: {effective_delay:.1f}m")
 
         post_title = getattr(latest_post, 'title', '')[:60]
         timing_note = f" · ⏱ {original_delay:.1f}m→{effective_delay:.1f}m" if timing_adjusted else ""
