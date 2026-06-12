@@ -48,6 +48,10 @@ class PendingPost:
     vote_time: datetime
     runtime: AuthorRuntime
     attempts: int = 0
+    next_retry: datetime | None = None  # set after a failed vote attempt
+
+    RETRY_DELAY_SECS: int = 15
+    MAX_ATTEMPTS: int = 5
 
 
 class CurationEngine:
@@ -71,6 +75,7 @@ class CurationEngine:
         self.votes_made = 0
         self._activity: deque[dict] = deque(maxlen=50)
         self._state_lock = threading.Lock()  # protects pending_posts, votes_made, _activity
+        self._pending_event = threading.Event()  # wakes pending thread when a new post is queued
 
         # Cache for _has_voted_in_last_18h: author -> (timestamp, result)
         # Avoids N heavy API calls per loop tick when the fanbase is large.
@@ -192,6 +197,11 @@ class CurationEngine:
             target=self._main_loop, name=f"curation-{self.voter_username}", daemon=True
         )
         self._thread.start()
+        # Dedicated thread for pending posts — checks every 10s independently of the scan cycle
+        self._pending_thread = threading.Thread(
+            target=self._pending_loop, name=f"pending-{self.voter_username}", daemon=True
+        )
+        self._pending_thread.start()
         logger.info(f"Engine started for @{self.voter_username}")
         self._log_activity("started", detail=f"Monitoring {len(self.authors)} authors")
         return True
@@ -205,6 +215,33 @@ class CurationEngine:
 
     # ── main loop ──
 
+    def _pending_loop(self):
+        """Wakes at exactly the right moment to cast each queued vote."""
+        while self.running:
+            with self._state_lock:
+                pending_snapshot = list(self.pending_posts)
+
+            now = datetime.utcnow()
+            next_wake = None
+            for pd in pending_snapshot:
+                expire = pd.post_time + timedelta(minutes=self.max_post_age_minutes)
+                # Wake at vote_time, or at next_retry if a previous attempt failed
+                target = pd.next_retry if pd.next_retry else pd.vote_time
+                target = min(target, expire)
+                if target > now:
+                    if next_wake is None or target < next_wake:
+                        next_wake = target
+
+            sleep_secs = max(0.0, (next_wake - datetime.utcnow()).total_seconds()) if next_wake else 60
+
+            self._pending_event.wait(timeout=sleep_secs)
+            self._pending_event.clear()
+
+            try:
+                self._check_pending_posts()
+            except Exception as e:
+                logger.error(f"[{self.voter_username}] Pending loop error: {e}")
+
     def _main_loop(self):
         logger.info(
             f"[{self.voter_username}] Monitoring {len(self.authors)} authors "
@@ -217,7 +254,6 @@ class CurationEngine:
             while self.running:
                 try:
                     self._last_activity_ts = time.time()
-                    self._check_pending_posts()
 
                     with self._lock:
                         authors_snapshot = dict(self.authors)
@@ -400,6 +436,7 @@ class CurationEngine:
                     vote_time=vote_at,
                     runtime=runtime,
                 ))
+            self._pending_event.set()  # wake pending thread immediately
             wait_min = effective_delay - post_age
             logger.info(
                 f"[{self.voter_username}] Queued @{author} — vote in {wait_min:.1f}m"
@@ -415,16 +452,41 @@ class CurationEngine:
         for pd in pending_snapshot:
             max_time = pd.post_time + timedelta(minutes=self.max_post_age_minutes)
             if current_time >= max_time:
+                logger.warning(
+                    f"[{self.voter_username}] @{pd.author} post expired after "
+                    f"{pd.attempts} attempt(s) — removing from pending"
+                )
                 with self._state_lock:
                     if pd in self.pending_posts:
                         self.pending_posts.remove(pd)
                 continue
-            if current_time >= pd.vote_time:
-                logger.info(f"[{self.voter_username}] Processing queued vote for @{pd.author}")
-                if self._upvote_post(pd.post, pd.author, pd.runtime):
+            # Skip if it's not yet vote_time and no retry is due
+            due = pd.next_retry if pd.next_retry else pd.vote_time
+            if current_time < due:
+                continue
+            logger.info(f"[{self.voter_username}] Processing queued vote for @{pd.author} (attempt {pd.attempts + 1})")
+            if self._upvote_post(pd.post, pd.author, pd.runtime):
+                with self._state_lock:
+                    if pd in self.pending_posts:
+                        self.pending_posts.remove(pd)
+            else:
+                pd.attempts += 1
+                if pd.attempts >= pd.MAX_ATTEMPTS:
+                    logger.error(
+                        f"[{self.voter_username}] @{pd.author} vote failed after "
+                        f"{pd.MAX_ATTEMPTS} attempts — giving up"
+                    )
+                    self._log_activity("error", author=pd.author, detail=f"Vote failed after {pd.MAX_ATTEMPTS} attempts", level="warn")
                     with self._state_lock:
                         if pd in self.pending_posts:
                             self.pending_posts.remove(pd)
+                else:
+                    pd.next_retry = datetime.utcnow() + timedelta(seconds=pd.RETRY_DELAY_SECS)
+                    logger.warning(
+                        f"[{self.voter_username}] Vote failed for @{pd.author}, "
+                        f"retry in {pd.RETRY_DELAY_SECS}s (attempt {pd.attempts}/{pd.MAX_ATTEMPTS})"
+                    )
+                    self._pending_event.set()  # wake thread to recalculate next sleep
 
     def _log_status(self):
         try:
