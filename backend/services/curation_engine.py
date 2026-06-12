@@ -452,10 +452,15 @@ class CurationEngine:
         for pd in pending_snapshot:
             max_time = pd.post_time + timedelta(minutes=self.max_post_age_minutes)
             if current_time >= max_time:
-                logger.warning(
-                    f"[{self.voter_username}] @{pd.author} post expired after "
-                    f"{pd.attempts} attempt(s) — removing from pending"
-                )
+                if pd.attempts > 0:
+                    msg = f"Post scaduto dopo {pd.attempts} tentativo/i senza voto"
+                    logger.warning(f"[{self.voter_username}] @{pd.author} {msg}")
+                    self._log_activity("expired", author=pd.author, detail=msg, level="warn")
+                elif current_time >= pd.vote_time:
+                    # vote_time was reached but we never got to vote (e.g. scan was busy)
+                    msg = "Post scaduto — voto non eseguito in tempo"
+                    logger.warning(f"[{self.voter_username}] @{pd.author} {msg}")
+                    self._log_activity("expired", author=pd.author, detail=msg, level="warn")
                 with self._state_lock:
                     if pd in self.pending_posts:
                         self.pending_posts.remove(pd)
