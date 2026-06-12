@@ -1,4 +1,5 @@
 import logging
+import time
 from beem import Steem
 from beem.account import Account
 from beem.exceptions import AccountDoesNotExistsException
@@ -20,7 +21,7 @@ class SteemClient:
 
     def connect(self) -> bool:
         try:
-            self.steem = Steem(node=self._nodes, keys=[self._posting_key])
+            self.steem = Steem(node=self._nodes, keys=[self._posting_key], timeout=30)
             logger.info("Connected to Steem nodes")
             return True
         except Exception as e:
@@ -65,16 +66,22 @@ class SteemClient:
         return 0.0
 
     def upvote(self, post, weight: float, voter: str) -> bool:
-        try:
-            post.upvote(weight=weight, voter=voter)
-            return True
-        except Exception as e:
-            err = str(e)
-            if "Duplicate transaction" in err:
-                logger.warning(f"Duplicate-tx error for @{voter} on {post.authorperm} — vote likely went through")
+        for attempt in range(2):
+            try:
+                post.upvote(weight=weight, voter=voter)
                 return True
-            logger.error(f"Error upvoting as @{voter}: {e}")
-            return False
+            except Exception as e:
+                err = str(e)
+                if "Duplicate transaction" in err:
+                    logger.warning(f"Duplicate-tx error for @{voter} on {post.authorperm} — vote likely went through")
+                    return True
+                if "STEEM_MIN_VOTE_INTERVAL" in err and attempt == 0:
+                    logger.warning(f"Vote rate limit hit for @{voter}, retrying in 4s")
+                    time.sleep(4)
+                    continue
+                logger.error(f"Error upvoting as @{voter}: {e}")
+                return False
+        return False
 
     def comment_on_post(self, post, voter: str, body: str) -> bool:
         try:

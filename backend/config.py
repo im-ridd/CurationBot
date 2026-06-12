@@ -3,8 +3,8 @@ from cryptography.fernet import Fernet
 
 # --- Steem Nodes ---
 STEEM_NODES = [
-    "https://api.steemit.com",
     "https://api.moecki.online",
+    "https://api.steemit.com",
     "https://steemapi.boylikegirl.club",
     "https://cn.steems.top",
     "https://api.worldofxpilar.com",

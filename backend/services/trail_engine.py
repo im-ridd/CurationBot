@@ -1,3 +1,4 @@
+import queue
 import time
 import logging
 import threading
@@ -48,6 +49,14 @@ class TrailEngine:
         self.votes_replicated = 0
         self.ops_scanned = 0
         self._activity: deque[dict] = deque(maxlen=50)
+
+        # Serialize broadcast votes: Steem allows 1 vote per account every 3s
+        self._vote_lock = threading.Lock()
+        self._last_vote_ts = 0.0
+        self.MIN_VOTE_INTERVAL = 3.5  # seconds, small margin over chain limit
+
+        # Heartbeat updated by stream loop; used by external watchdog
+        self._last_op_ts: float = 0.0
 
     def _log_activity(self, event: str, detail: str = "", level: str = "info"):
         self._activity.appendleft({
@@ -150,16 +159,49 @@ class TrailEngine:
     # ── stream loop ──
 
     def _stream_loop(self):
+        # Steem produces a block every 3s.  If no op arrives for 5 minutes either
+        # the node is dead (half-open TCP) or all nodes are unreachable.  We detect
+        # this via a queue timeout and reconnect gracefully.
+        STREAM_TIMEOUT = 300  # seconds
+
         logger.info(
             f"[trail-{self.voter_username}] Streaming votes, watching {len(self.rules)} leaders"
         )
         while self.running:
+            op_queue: queue.Queue = queue.Queue(maxsize=500)
+            stop_event = threading.Event()
+            producer = threading.Thread(
+                target=self._stream_producer,
+                args=(op_queue, stop_event),
+                daemon=True,
+                name=f"trail-producer-{self.voter_username}",
+            )
+            producer.start()
+            self._last_op_ts = time.time()
+
             try:
-                bc = Blockchain(blockchain_instance=self.client.steem)
-                for op in bc.stream(opNames=["vote"]):
-                    if not self.running:
+                while self.running:
+                    try:
+                        op = op_queue.get(timeout=STREAM_TIMEOUT)
+                    except queue.Empty:
+                        logger.warning(
+                            f"[trail-{self.voter_username}] Stream idle for {STREAM_TIMEOUT}s "
+                            "— reconnecting"
+                        )
+                        self._log_activity(
+                            "stream_stall",
+                            detail=f"No ops for {STREAM_TIMEOUT}s, reconnecting",
+                            level="warn",
+                        )
+                        break  # exit inner loop → reconnect below
+
+                    if op is None:  # producer signalled an unrecoverable error
+                        logger.error(
+                            f"[trail-{self.voter_username}] Stream producer error — reconnecting in 5s"
+                        )
                         break
 
+                    self._last_op_ts = time.time()
                     self.ops_scanned += 1
                     voter = op.get("voter", "")
 
@@ -172,7 +214,7 @@ class TrailEngine:
                     # Leader voted — replicate
                     author = op.get("author", "")
                     permlink = op.get("permlink", "")
-                    leader_weight = op.get("weight", 0) / 100.0  # beem weight is in 0-10000
+                    leader_weight = op.get("weight", 0) / 100.0  # beem: 0-10000 → 0-100
 
                     # Don't trail downvotes
                     if leader_weight <= 0:
@@ -189,9 +231,14 @@ class TrailEngine:
                         f"{leader_weight:.1f}% on @{author}/{permlink[:30]}... "
                         f"→ replicating at {scaled_weight:.1f}%"
                     )
-                    self._log_activity("leader_vote", detail=f"@{voter} voted {leader_weight:.1f}% on @{author}/{permlink[:30]} → {scaled_weight:.1f}%")
+                    self._log_activity(
+                        "leader_vote",
+                        detail=(
+                            f"@{voter} voted {leader_weight:.1f}% on "
+                            f"@{author}/{permlink[:30]} → {scaled_weight:.1f}%"
+                        ),
+                    )
                     if rule.delay_seconds > 0:
-                        # Spawn a delayed vote in a separate thread
                         threading.Thread(
                             target=self._delayed_vote,
                             args=(author, permlink, scaled_weight, rule.delay_seconds),
@@ -200,12 +247,37 @@ class TrailEngine:
                     else:
                         self._cast_vote(author, permlink, scaled_weight)
 
-            except Exception as e:
-                logger.error(f"[trail-{self.voter_username}] Stream error: {e}")
-                if self.running:
-                    time.sleep(5)  # backoff before reconnect
+            finally:
+                stop_event.set()  # ask producer to exit on next op
+
+            if self.running:
+                time.sleep(5)
+                self.client.connect()  # fresh Steem instance for next iteration
 
         logger.info(f"[trail-{self.voter_username}] Stream loop exited")
+
+    def _stream_producer(self, op_queue: queue.Queue, stop_event: threading.Event):
+        """Runs in a daemon thread; feeds vote ops into op_queue.
+
+        Signals the consumer by putting ``None`` on error so it can break out
+        instead of waiting for the full STREAM_TIMEOUT.
+        """
+        try:
+            bc = Blockchain(blockchain_instance=self.client.steem)
+            for op in bc.stream(opNames=["vote"]):
+                if stop_event.is_set():
+                    return
+                try:
+                    op_queue.put_nowait(op)
+                except queue.Full:
+                    pass  # rare backpressure — drop the op
+        except Exception as e:
+            logger.error(f"[trail-{self.voter_username}] Stream producer error: {e}")
+            if not stop_event.is_set():
+                try:
+                    op_queue.put_nowait(None)  # wake consumer
+                except queue.Full:
+                    pass
 
     def _delayed_vote(self, author: str, permlink: str, weight: float, delay: int):
         logger.info(
@@ -232,7 +304,18 @@ class TrailEngine:
                 logger.warning(f"[trail-{self.voter_username}] VP too low ({vp:.1f}%), skipping")
                 return
 
-            if self.client.upvote(post, weight=weight, voter=self.voter_username):
+            # Enforce the 3-second chain rule WITHOUT holding the lock during the
+            # actual network call — otherwise every concurrent delayed-vote thread
+            # would be blocked for the full round-trip time of the upvote RPC.
+            with self._vote_lock:
+                wait = self._last_vote_ts + self.MIN_VOTE_INTERVAL - time.time()
+                if wait > 0:
+                    time.sleep(wait)
+                self._last_vote_ts = time.time()  # reserve this slot
+            # Lock released — upvote is made outside it
+            success = self.client.upvote(post, weight=weight, voter=self.voter_username)
+
+            if success:
                 self.votes_replicated += 1
                 logger.info(
                     f"[trail-{self.voter_username}] Voted {weight:.1f}% on {identifier}"

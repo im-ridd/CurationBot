@@ -70,6 +70,15 @@ class CurationEngine:
         self.votes_made = 0
         self._activity: deque[dict] = deque(maxlen=50)
 
+        # Cache for _has_voted_in_last_18h: author -> (timestamp, result)
+        # Avoids N heavy API calls per loop tick when the fanbase is large.
+        self._vote_history_cache: dict[str, tuple[float, bool]] = {}
+        _VOTE_HISTORY_TTL = 600  # seconds (10 min)
+        self._vote_history_ttl = _VOTE_HISTORY_TTL
+
+        # Heartbeat updated every main-loop iteration; used by watchdog.
+        self._last_activity_ts: float = 0.0
+
     def _log_activity(self, event: str, author: str = "", detail: str = "", level: str = "info"):
         self._activity.appendleft({
             "ts": datetime.utcnow().strftime("%H:%M:%S"),
@@ -193,6 +202,7 @@ class CurationEngine:
         )
         while self.running:
             try:
+                self._last_activity_ts = time.time()
                 with self._lock:
                     authors_snapshot = dict(self.authors)
 
@@ -214,6 +224,10 @@ class CurationEngine:
     # ── voting logic (ported from sniper_biz.py) ──
 
     def _has_voted_in_last_18h(self, author: str, daily_limit: int) -> bool:
+        # Use cached result if fresh enough to avoid hammering the API every tick
+        cached = self._vote_history_cache.get(author)
+        if cached and time.time() - cached[0] < self._vote_history_ttl:
+            return cached[1]
         try:
             current_time = datetime.utcnow()
             cutoff_time = current_time - timedelta(hours=18)
@@ -224,7 +238,9 @@ class CurationEngine:
                 if post_time > cutoff_time:
                     if self.client.has_already_voted(post, self.voter_username):
                         votes_in_period += 1
-            return votes_in_period >= daily_limit
+            result = votes_in_period >= daily_limit
+            self._vote_history_cache[author] = (time.time(), result)
+            return result
         except Exception as e:
             logger.error(f"[{self.voter_username}] Error checking vote history for @{author}: {e}")
             return False
@@ -267,6 +283,8 @@ class CurationEngine:
             if self.client.upvote(post, weight=runtime.vote_percentage * 1.0, voter=self.voter_username):
                 self.votes_made += 1
                 runtime.record_vote()
+                # Invalidate history cache so the next loop knows we already voted
+                self._vote_history_cache.pop(author, None)
                 title = getattr(post, 'title', '')[:60]
                 logger.info(
                     f"[{self.voter_username}] Voted {runtime.vote_percentage}% on @{author}: "

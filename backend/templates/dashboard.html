@@ -1,22 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — CurationBot{% endblock %}
+{% block title %}Curation — CurationBot{% endblock %}
 
 {% block content %}
-<h1>Dashboard</h1>
+<h1>&#9733; Curation Dashboard</h1>
 
-<!-- Global stats bar -->
+{% if flash %}
+<div class="flash {% if flash_error %}flash-error{% endif %}">{{ flash }}</div>
+{% endif %}
+
+<!-- Curation stats bar -->
 <div class="grid">
     <article class="stat-card">
         <h2>{{ stats.voters.total }}</h2>
-        <p>Voters ({{ stats.voters.enabled }} active)</p>
+        <p>Curation Voters ({{ stats.voters.enabled }} active)</p>
     </article>
     <article class="stat-card">
         <h2>{{ stats.fanbase_entries.total }}</h2>
         <p>Fanbase ({{ stats.fanbase_entries.enabled }} active)</p>
     </article>
     <article class="stat-card">
-        <h2>{{ stats.trail_rules.total }}</h2>
-        <p>Trails ({{ stats.trail_rules.enabled }} active)</p>
+        <p style="margin-top:1rem"><a href="/ui/trails">&#10149; Manage Trail Accounts</a></p>
     </article>
 </div>
 
@@ -33,11 +36,10 @@
 <article>
     <header>
         <div class="voter-header">
-            <strong>Engines</strong>
+            <strong>Curation Engines</strong>
             <div class="actions">
-                <form method="post" action="/ui/bot/start-all"><button class="outline">Start All Curation</button></form>
+                <form method="post" action="/ui/bot/start-all"><button class="outline">Start All</button></form>
                 <form method="post" action="/ui/bot/stop-all"><button class="outline secondary">Stop All</button></form>
-                <form method="post" action="/ui/bot/trails/start-all"><button class="outline">Start All Trails</button></form>
             </div>
         </div>
     </header>

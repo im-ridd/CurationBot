@@ -15,6 +15,10 @@
         <form method="post" action="/ui/bot/voters/{{ voter.id }}/start"><button class="outline">Start Engine</button></form>
         <form method="post" action="/ui/bot/voters/{{ voter.id }}/stop"><button class="outline secondary">Stop</button></form>
         <form method="post" action="/ui/bot/voters/{{ voter.id }}/reload"><button class="outline">Reload Fanbase</button></form>
+        <form method="post" action="/ui/voters/{{ voter.id }}/delete"
+              onsubmit="return confirm('Delete @{{ voter.username }} and all its fanbase? This cannot be undone.')">
+            <button class="outline secondary" style="color:var(--pico-del-color);border-color:var(--pico-del-color)">Delete Voter</button>
+        </form>
     </div>
 </div>
 

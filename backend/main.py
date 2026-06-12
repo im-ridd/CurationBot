@@ -8,6 +8,14 @@ Usage:
 import argparse
 import logging
 import os
+
+# Load .env file when running locally (no-op if python-dotenv is not installed)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import uvicorn
 
 from backend.config import API_HOST, API_PORT

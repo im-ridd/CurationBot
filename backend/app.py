@@ -3,7 +3,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
-from backend.database import engine
+from backend.database import engine, run_migrations
 from backend.models import Base
 from backend.routers import voters, fanbase, trails, status, bot_control
 from backend.routers.frontend import router as frontend_router
@@ -14,9 +14,12 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+# beem's node failover spams WARNING on transient node hiccups; only show real errors
+logging.getLogger("beemapi.node").setLevel(logging.ERROR)
 
-# Create all tables on startup
+# Create all tables on startup, then apply lightweight column migrations
 Base.metadata.create_all(bind=engine)
+run_migrations()
 
 app = FastAPI(
     title="CurationBot API",

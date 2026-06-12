@@ -18,6 +18,8 @@ class VoterAccount(Base):
     max_post_age_minutes = Column(Float, default=5.0)
     interval_seconds = Column(Integer, default=1)
     enabled = Column(Boolean, default=True)
+    # When True this account is used only for trail-following; no CurationEngine is created
+    trail_only = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

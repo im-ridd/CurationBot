@@ -2,7 +2,7 @@
 {% block title %}Trails — CurationBot{% endblock %}
 
 {% block content %}
-<h1>Trail Rules</h1>
+<h1>&#10149; Trail Dashboard</h1>
 
 {% if flash %}
 <div class="flash {% if flash_error %}flash-error{% endif %}">{{ flash }}</div>
@@ -11,18 +11,94 @@
 <!-- Summary stats -->
 <div class="grid">
     <article class="stat-card">
-        <h2>{{ trails|length }}</h2>
-        <p>Trail Rules</p>
+        <h2>{{ trail_accounts|length }}</h2>
+        <p>Trail Accounts</p>
     </article>
     <article class="stat-card">
         <h2>{{ trails|selectattr('enabled')|list|length }}</h2>
-        <p>Active</p>
+        <p>Active Trail Rules</p>
     </article>
     <article class="stat-card">
-        <h2>{{ voters|length }}</h2>
-        <p>Voter Accounts</p>
+        <h2>{{ trails|length }}</h2>
+        <p>Total Rules</p>
     </article>
 </div>
+
+<!-- Trail Accounts -->
+<article>
+    <header>
+        <div class="voter-header">
+            <strong>Trail Accounts</strong>
+            <button onclick="document.getElementById('add-trail-account-dialog').showModal()">+ Add Account</button>
+        </div>
+    </header>
+    {% if trail_accounts %}
+    <div style="overflow-x:auto">
+    <table>
+        <thead>
+            <tr>
+                <th>Account</th>
+                <th>Rules</th>
+                <th>Status</th>
+                <th>Engine</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for ta in trail_accounts %}
+            <tr>
+                <td>
+                    <strong>@{{ ta.username }}</strong>
+                    {% if not ta.trail_only %}
+                        <span class="badge badge-blue" style="font-size:0.7rem;margin-left:0.3rem">curation+trail</span>
+                    {% endif %}
+                </td>
+                <td>{{ ta.rule_count }}</td>
+                <td>
+                    {% if ta.enabled %}<span class="badge badge-green">enabled</span>
+                    {% else %}<span class="badge badge-red">disabled</span>{% endif %}
+                </td>
+                <td>
+                    {% set engine_running = namespace(val=false) %}
+                    {% for t in trail_engines %}
+                        {% if t.voter == ta.username %}{% set engine_running.val = t.running %}{% endif %}
+                    {% endfor %}
+                    {% if engine_running.val %}
+                        <span class="badge badge-green">running</span>
+                    {% else %}
+                        <span class="badge badge-red">stopped</span>
+                    {% endif %}
+                </td>
+                <td class="actions">
+                    <form method="post" action="/ui/bot/trails/{{ ta.id }}/start">
+                        <button class="outline" style="padding:0.3rem 0.7rem;font-size:0.85rem">Start</button>
+                    </form>
+                    <form method="post" action="/ui/bot/trails/{{ ta.id }}/stop">
+                        <button class="outline secondary" style="padding:0.3rem 0.7rem;font-size:0.85rem">Stop</button>
+                    </form>
+                    {% if ta.trail_only %}
+                    <form method="post" action="/ui/trail-accounts/{{ ta.id }}/toggle">
+                        <button class="outline" style="padding:0.3rem 0.7rem;font-size:0.85rem">
+                            {% if ta.enabled %}Disable{% else %}Enable{% endif %}
+                        </button>
+                    </form>
+                    {% endif %}
+                    <form method="post" action="/ui/trail-accounts/{{ ta.id }}/delete"
+                          onsubmit="return confirm('{% if ta.trail_only %}Elimina account @{{ ta.username }} e tutte le sue trail rules?{% else %}Rimuovi le trail rules di @{{ ta.username }}? L\'account curation non viene toccato.{% endif %}')">
+                        <button class="outline secondary" style="padding:0.3rem 0.7rem;font-size:0.85rem;{% if ta.trail_only %}color:var(--pico-del-color);border-color:var(--pico-del-color){% endif %}">
+                            {% if ta.trail_only %}Del Account{% else %}Remove Rules{% endif %}
+                        </button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p>No trail accounts yet. Click <strong>+ Add Account</strong> to get started.</p>
+    {% endif %}
+</article>
 
 <!-- Trail Engines Runtime -->
 <article>
@@ -30,7 +106,7 @@
         <div class="voter-header">
             <strong>Trail Engines</strong>
             <div class="actions">
-                <form method="post" action="/ui/bot/trails/start-all"><button class="outline">Start All Trails</button></form>
+                <form method="post" action="/ui/bot/trails/start-all"><button class="outline">Start All</button></form>
             </div>
         </div>
     </header>
@@ -39,12 +115,25 @@
     </div>
 </article>
 
-<!-- Configured Rules -->
+<!-- Live Trail Activity -->
 <article>
     <header>
         <div class="voter-header">
-            <strong>Configured Rules</strong>
-            <button onclick="document.getElementById('add-trail-dialog').showModal()">+ Add Trail</button>
+            <strong>Live Trail Activity</strong>
+            <small style="color:var(--pico-muted-color)">auto-refresh 5s</small>
+        </div>
+    </header>
+    <div id="trail-activity" hx-get="/ui/partials/trail-activity" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <p aria-busy="true">Loading activity...</p>
+    </div>
+</article>
+
+<!-- Trail Rules -->
+<article>
+    <header>
+        <div class="voter-header">
+            <strong>Trail Rules</strong>
+            <button onclick="document.getElementById('add-trail-dialog').showModal()">+ Add Rule</button>
         </div>
     </header>
 
@@ -89,11 +178,33 @@
     </table>
     </div>
     {% else %}
-    <p>No trail rules configured. Click <strong>+ Add Trail</strong> to get started.</p>
+    <p>No trail rules configured. Click <strong>+ Add Rule</strong> to get started.</p>
     {% endif %}
 </article>
 
-<!-- Add trail dialog -->
+<!-- Add trail account dialog -->
+<dialog id="add-trail-account-dialog">
+    <article>
+        <header>
+            <button aria-label="Close" rel="prev" onclick="this.closest('dialog').close()"></button>
+            <h3>Add Trail Account</h3>
+        </header>
+        <p style="font-size:0.9rem;color:var(--pico-muted-color)">
+            Trail accounts follow leaders' votes. No curation engine is created for them.
+        </p>
+        <form method="post" action="/ui/trail-accounts/add">
+            <label>Steem Username
+                <input name="username" required placeholder="e.g. myaccount">
+            </label>
+            <label>Posting Key (WIF)
+                <input name="posting_key" type="password" required placeholder="5K...">
+            </label>
+            <button type="submit">Add Trail Account</button>
+        </form>
+    </article>
+</dialog>
+
+<!-- Add trail rule dialog -->
 <dialog id="add-trail-dialog">
     <article>
         <header>
@@ -101,7 +212,7 @@
             <h3>Add Trail Rule</h3>
         </header>
         <form method="post" action="/ui/trails/add">
-            <label>Follower (voter account)
+            <label>Follower (account that will copy votes)
                 <select name="follower_id" required>
                     {% for v in voters %}
                     <option value="{{ v.id }}">@{{ v.username }}</option>
@@ -122,12 +233,12 @@
                     <input name="delay_seconds" type="number" value="0" min="0">
                 </label>
             </div>
-            <button type="submit">Create Trail</button>
+            <button type="submit">Create Rule</button>
         </form>
     </article>
 </dialog>
 
-<!-- Edit trail dialog -->
+<!-- Edit trail rule dialog -->
 <dialog id="edit-trail-dialog">
     <article>
         <header>

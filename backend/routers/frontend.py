@@ -68,16 +68,16 @@ def logout():
 
 @router.get("", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
-    voters_total = db.query(func.count(VoterAccount.id)).scalar()
-    voters_enabled = db.query(func.count(VoterAccount.id)).filter(VoterAccount.enabled.is_(True)).scalar()
+    # Stats — curation side only
+    voters_total = db.query(func.count(VoterAccount.id)).filter(VoterAccount.trail_only.is_(False)).scalar()
+    voters_enabled = db.query(func.count(VoterAccount.id)).filter(VoterAccount.enabled.is_(True), VoterAccount.trail_only.is_(False)).scalar()
     fb_total = db.query(func.count(FanbaseEntry.id)).scalar()
     fb_enabled = db.query(func.count(FanbaseEntry.id)).filter(FanbaseEntry.enabled.is_(True)).scalar()
-    tr_total = db.query(func.count(TrailRule.id)).scalar()
-    tr_enabled = db.query(func.count(TrailRule.id)).filter(TrailRule.enabled.is_(True)).scalar()
 
     voters = (
         db.query(VoterAccount, func.count(FanbaseEntry.id))
         .outerjoin(FanbaseEntry)
+        .filter(VoterAccount.trail_only.is_(False))
         .group_by(VoterAccount.id)
         .all()
     )
@@ -93,10 +93,12 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     stats = {
         "voters": {"total": voters_total, "enabled": voters_enabled},
         "fanbase_entries": {"total": fb_total, "enabled": fb_enabled},
-        "trail_rules": {"total": tr_total, "enabled": tr_enabled},
     }
+    flash = request.query_params.get("flash")
+    flash_error = request.query_params.get("error")
     return templates.TemplateResponse(request, "dashboard.html", {
         "stats": stats, "voters": voter_list,
+        "flash": flash, "flash_error": flash_error,
     })
 
 
@@ -129,14 +131,37 @@ def voter_detail(request: Request, voter_id: int, db: Session = Depends(get_db))
 @router.get("/trails", response_class=HTMLResponse)
 def trails_page(request: Request, db: Session = Depends(get_db)):
     rules = db.query(TrailRule).order_by(TrailRule.id).all()
-    voters = db.query(VoterAccount).order_by(VoterAccount.username).all()
+    all_voters = db.query(VoterAccount).order_by(VoterAccount.username).all()
 
-    # Resolve follower names
-    voter_map = {v.id: v.username for v in voters}
+    # Voter IDs that have at least one trail rule
+    voter_ids_with_rules = {r.follower_id for r in rules}
+
+    # Trail accounts = trail-only accounts OR curation voters that also have trail rules
+    trail_accounts_raw = [
+        v for v in all_voters
+        if v.trail_only or v.id in voter_ids_with_rules
+    ]
+
+    # Count trail rules per account for display
+    trail_rule_counts = {}
+    for r in rules:
+        trail_rule_counts[r.follower_id] = trail_rule_counts.get(r.follower_id, 0) + 1
+
+    trail_account_list = [{
+        "id": v.id,
+        "username": v.username,
+        "enabled": v.enabled,
+        "rule_count": trail_rule_counts.get(v.id, 0),
+        "trail_only": v.trail_only,  # False = also a curation voter
+    } for v in trail_accounts_raw]
+
+    # Resolve follower names for rules table
+    voter_map = {v.id: v.username for v in all_voters}
     trail_list = []
     for r in rules:
         trail_list.append({
             "id": r.id,
+            "follower_id": r.follower_id,
             "follower_name": voter_map.get(r.follower_id, f"id:{r.follower_id}"),
             "leader_username": r.leader_username,
             "weight_scale": r.weight_scale,
@@ -149,7 +174,10 @@ def trails_page(request: Request, db: Session = Depends(get_db)):
     flash_error = request.query_params.get("error")
     return templates.TemplateResponse(request, "trails.html", {
         "trails": trail_list,
-        "voters": [{"id": v.id, "username": v.username} for v in voters],
+        "trail_accounts": trail_account_list,
+        "trail_engines": _mgr().get_all_trail_status(),
+        # all voters available as trail followers (both trail-only and curation)
+        "voters": [{"id": v.id, "username": v.username} for v in all_voters],
         "flash": flash, "flash_error": flash_error,
     })
 
@@ -217,10 +245,10 @@ def partial_single_account(request: Request, username: str):
 
 @router.get("/partials/runtime-status", response_class=HTMLResponse)
 def partial_runtime_status(request: Request):
+    """Dashboard partial: curation engines only."""
     mgr = _mgr()
     return templates.TemplateResponse(request, "partials/runtime_status.html", {
         "curation": mgr.get_all_status(),
-        "trails": mgr.get_all_trail_status(),
     })
 
 
@@ -234,16 +262,12 @@ def partial_trail_status(request: Request):
 
 @router.get("/partials/activity", response_class=HTMLResponse)
 def partial_activity(request: Request):
-    """HTMX partial: merged activity feed from all curation + trail engines."""
+    """HTMX partial: curation-only activity feed (dashboard)."""
     mgr = _mgr()
     events = []
     for s in mgr.get_all_status():
         for ev in s.get("activity", []):
             events.append({**ev, "source": s["voter"], "type": "curation"})
-    for s in mgr.get_all_trail_status():
-        for ev in s.get("activity", []):
-            events.append({**ev, "source": s["voter"], "author": "", "type": "trail"})
-    # Sort newest first (already newest-first per engine, merge sort by timestamp)
     events.sort(key=lambda e: e["ts"], reverse=True)
     return templates.TemplateResponse(request, "partials/activity_feed.html", {
         "events": events[:80],
@@ -284,10 +308,68 @@ def form_add_voter(
         min_voting_power=min_voting_power,
         max_post_age_minutes=max_post_age_minutes,
         enabled=True,
+        trail_only=False,
     )
     db.add(voter)
     db.commit()
     return RedirectResponse(f"/ui/voters/{voter.id}?flash=Voter+created", status_code=303)
+
+
+# ── Trail accounts (trail-only voters managed from the Trails page) ──
+
+@router.post("/trail-accounts/add")
+def form_add_trail_account(
+    username: str = Form(...),
+    posting_key: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    username = username.strip().lower()
+    existing = db.query(VoterAccount).filter(VoterAccount.username == username).first()
+    if existing:
+        if not existing.trail_only:
+            # Already a curation voter — it's already available as a trail follower.
+            # Update its posting key if one was provided, so trail engine can use it.
+            if posting_key.strip():
+                existing.posting_key_encrypted = _encrypt_key(posting_key.strip())
+                db.commit()
+            return RedirectResponse(
+                f"/ui/trails?flash=@{username}+e+gia+un+voter+curation+e+puo+essere+usato+come+follower+trail+%E2%80%94+aggiungi+le+regole+qui+sotto",
+                status_code=303,
+            )
+        return RedirectResponse("/ui/trails?flash=Account+gia+esistente&error=1", status_code=303)
+    voter = VoterAccount(
+        username=username,
+        posting_key_encrypted=_encrypt_key(posting_key),
+        enabled=True,
+        trail_only=True,
+    )
+    db.add(voter)
+    db.commit()
+    return RedirectResponse("/ui/trails?flash=Trail+account+aggiunto", status_code=303)
+
+
+@router.post("/trail-accounts/{voter_id}/delete")
+def form_delete_trail_account(voter_id: int, db: Session = Depends(get_db)):
+    voter = db.query(VoterAccount).filter(VoterAccount.id == voter_id).first()
+    if voter:
+        _mgr().stop_trail(voter_id)
+        if voter.trail_only:
+            # Pure trail account — delete entirely (cascade removes trail rules)
+            db.delete(voter)
+        else:
+            # Curation voter — only remove trail rules, keep the curation account
+            db.query(TrailRule).filter(TrailRule.follower_id == voter_id).delete()
+        db.commit()
+    return RedirectResponse("/ui/trails?flash=Trail+rules+removed", status_code=303)
+
+
+@router.post("/trail-accounts/{voter_id}/toggle")
+def form_toggle_trail_account(voter_id: int, db: Session = Depends(get_db)):
+    voter = db.query(VoterAccount).filter(VoterAccount.id == voter_id).first()
+    if voter:
+        voter.enabled = not voter.enabled
+        db.commit()
+    return RedirectResponse("/ui/trails", status_code=303)
 
 
 @router.post("/voters/{voter_id}/edit")
@@ -309,6 +391,27 @@ def form_edit_voter(
         voter.posting_key_encrypted = _encrypt_key(posting_key.strip())
     db.commit()
     return RedirectResponse(f"/ui/voters/{voter_id}?flash=Settings+saved", status_code=303)
+
+
+@router.post("/voters/{voter_id}/delete")
+def form_delete_voter(voter_id: int, db: Session = Depends(get_db)):
+    voter = db.query(VoterAccount).filter(
+        VoterAccount.id == voter_id, VoterAccount.trail_only.is_(False)
+    ).first()
+    if not voter:
+        return RedirectResponse("/ui", status_code=303)
+    _mgr().stop_voter(voter_id)
+    # Check if this account also has trail rules — preserve them
+    has_trail = db.query(TrailRule).filter(TrailRule.follower_id == voter_id).count() > 0
+    if has_trail:
+        # Remove only curation data; convert account to trail-only
+        db.query(FanbaseEntry).filter(FanbaseEntry.voter_id == voter_id).delete()
+        voter.trail_only = True
+        db.commit()
+        return RedirectResponse("/ui?flash=Curation+rimossa+%E2%80%94+le+trail+rules+sono+state+conservate", status_code=303)
+    db.delete(voter)
+    db.commit()
+    return RedirectResponse("/ui?flash=Voter+eliminato", status_code=303)
 
 
 # ────────────────────── Form actions: Fanbase ──────────────────────
@@ -567,3 +670,15 @@ def form_reload_voter(voter_id: int):
 def form_start_all_trails():
     _mgr().start_all_trails()
     return RedirectResponse("/ui/trails?flash=All+trails+started", status_code=303)
+
+
+@router.post("/bot/trails/{voter_id}/start")
+def form_start_trail(voter_id: int):
+    _mgr().start_trail(voter_id)
+    return RedirectResponse("/ui/trails?flash=Trail+started", status_code=303)
+
+
+@router.post("/bot/trails/{voter_id}/stop")
+def form_stop_trail(voter_id: int):
+    _mgr().stop_trail(voter_id)
+    return RedirectResponse("/ui/trails?flash=Trail+stopped", status_code=303)
