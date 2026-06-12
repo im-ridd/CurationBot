@@ -99,8 +99,7 @@ class SteemClient:
                 logger.error(f"Account @{username} does not exist")
                 return None
             except Exception as e:
-                err = str(e)
-                if self._should_rotate(err) and attempt < len(self._nodes) - 1:
+                if attempt < len(self._nodes) - 1:
                     self._rotate_node()
                     continue
                 # Fallback: try condenser_api.get_accounts (more widely supported)
@@ -131,11 +130,10 @@ class SteemClient:
                 posts = self._raw_blog(author, 1)
                 return posts[0] if posts else None
             except Exception as e:
-                err = str(e)
-                if self._should_rotate(err) and attempt < len(self._nodes) - 1:
+                if attempt < len(self._nodes) - 1:
                     self._rotate_node()
                     continue
-                logger.error(f"Error retrieving latest post for @{author}: {e}")
+                logger.warning(f"Error retrieving latest post for @{author}: {e}")
                 return None
         logger.warning(f"All nodes failed for @{author} (get_latest_post) — skipping this cycle")
         return None
@@ -145,8 +143,7 @@ class SteemClient:
             try:
                 return self._raw_blog(author, limit)
             except Exception as e:
-                err = str(e)
-                if self._should_rotate(err) and attempt < len(self._nodes) - 1:
+                if attempt < len(self._nodes) - 1:
                     self._rotate_node()
                     continue
                 logger.warning(f"Error retrieving blog for @{author}: {e}")
@@ -161,8 +158,7 @@ class SteemClient:
                 raw = self.steem.rpc.get_active_votes(author, permlink)
                 return raw or []
             except Exception as e:
-                err = str(e)
-                if self._should_rotate(err) and attempt < len(self._nodes) - 1:
+                if attempt < len(self._nodes) - 1:
                     self._rotate_node()
                     continue
                 logger.warning(f"Error retrieving active_votes for @{author}/{permlink}: {e}")

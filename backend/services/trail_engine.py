@@ -252,7 +252,10 @@ class TrailEngine:
 
             if self.running:
                 time.sleep(5)
-                self.client.connect()  # fresh Steem instance for next iteration
+                if not self.client.connect():  # fresh Steem instance, may pick a different node
+                    logger.error(
+                        f"[trail-{self.voter_username}] Reconnect failed — will retry in 5s"
+                    )
 
         logger.info(f"[trail-{self.voter_username}] Stream loop exited")
 
