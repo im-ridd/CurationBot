@@ -195,9 +195,9 @@ class TrailEngine:
                         )
                         break  # exit inner loop → reconnect below
 
-                    if op is None:  # producer signalled an unrecoverable error
-                        logger.error(
-                            f"[trail-{self.voter_username}] Stream producer error — reconnecting in 5s"
+                    if op is None:  # producer signalled a stream error → reconnect
+                        logger.warning(
+                            f"[trail-{self.voter_username}] Stream disconnected — reconnecting in 5s"
                         )
                         break
 
@@ -272,7 +272,7 @@ class TrailEngine:
                 except queue.Full:
                     pass  # rare backpressure — drop the op
         except Exception as e:
-            logger.error(f"[trail-{self.voter_username}] Stream producer error: {e}")
+            logger.warning(f"[trail-{self.voter_username}] Stream interrupted: {e}")
             if not stop_event.is_set():
                 try:
                     op_queue.put_nowait(None)  # wake consumer

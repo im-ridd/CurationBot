@@ -40,7 +40,6 @@ class SteemClient:
         self.steem: Steem | None = None
 
     # Errors that mean the current node doesn't support a required API method.
-    # Beem doesn't auto-rotate on these, so we do it manually.
     _BAD_NODE_SIGNALS = (
         "Could not find method",
         "method_itr != api_itr",
@@ -53,12 +52,27 @@ class SteemClient:
     def _is_bad_node_error(self, err: str) -> bool:
         return any(s in err for s in self._BAD_NODE_SIGNALS)
 
+    def _is_transient_error(self, err: str) -> bool:
+        """Network/timeout errors that warrant rotating to the next node."""
+        transient = (
+            "timeout", "timed out", "time out",
+            "connection", "connect",
+            "lost connection", "remote end closed",
+            "could not receive", "internal error",
+            "read error", "socket",
+        )
+        lower = err.lower()
+        return any(s in lower for s in transient)
+
+    def _should_rotate(self, err: str) -> bool:
+        return self._is_bad_node_error(err) or self._is_transient_error(err)
+
     def _rotate_node(self):
         """Ask beem to switch to the next node in its list."""
         try:
             if self.steem and hasattr(self.steem, 'rpc'):
                 self.steem.rpc.next()
-                logger.warning("Rotated to next Steem node (API incompatibility)")
+                logger.warning("Rotated to next Steem node")
         except Exception:
             pass
 
@@ -86,7 +100,7 @@ class SteemClient:
                 return None
             except Exception as e:
                 err = str(e)
-                if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
+                if self._should_rotate(err) and attempt < len(self._nodes) - 1:
                     self._rotate_node()
                     continue
                 # Fallback: try condenser_api.get_accounts (more widely supported)
@@ -97,7 +111,7 @@ class SteemClient:
                     return None
                 except Exception:
                     pass
-                logger.error(f"Error fetching account @{username}: {e}")
+                logger.warning(f"Error fetching account @{username}: {e}")
                 return None
         logger.warning(f"All nodes failed for @{username} (get_account) — skipping this cycle")
         return None
@@ -118,7 +132,7 @@ class SteemClient:
                 return posts[0] if posts else None
             except Exception as e:
                 err = str(e)
-                if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
+                if self._should_rotate(err) and attempt < len(self._nodes) - 1:
                     self._rotate_node()
                     continue
                 logger.error(f"Error retrieving latest post for @{author}: {e}")
@@ -132,10 +146,10 @@ class SteemClient:
                 return self._raw_blog(author, limit)
             except Exception as e:
                 err = str(e)
-                if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
+                if self._should_rotate(err) and attempt < len(self._nodes) - 1:
                     self._rotate_node()
                     continue
-                logger.error(f"Error retrieving blog for @{author}: {e}")
+                logger.warning(f"Error retrieving blog for @{author}: {e}")
                 return []
         logger.warning(f"All nodes failed for @{author} (get_blog) — skipping this cycle")
         return []
@@ -148,10 +162,10 @@ class SteemClient:
                 return raw or []
             except Exception as e:
                 err = str(e)
-                if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
+                if self._should_rotate(err) and attempt < len(self._nodes) - 1:
                     self._rotate_node()
                     continue
-                logger.error(f"Error retrieving active_votes for @{author}/{permlink}: {e}")
+                logger.warning(f"Error retrieving active_votes for @{author}/{permlink}: {e}")
                 return []
         logger.warning(f"All nodes failed for @{author} (get_active_votes)")
         return []
