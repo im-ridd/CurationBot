@@ -358,20 +358,24 @@ class CurationEngine:
             return False
 
     def _competitor_delay_from_blog(self, author: str, blog: list, competitor: str = "karja") -> float | None:
-        """Analyze competitor timing using an already-fetched blog list — no extra RPC.
-        active_votes is included in get_discussions_by_blog responses."""
+        """Analyze competitor timing on the previous post.
+        get_discussions_by_blog active_votes has no timestamps, so we make one
+        targeted get_active_votes call — only when a new post is detected (rare)."""
         try:
             if len(blog) > 1:
                 last_post = blog[1]
                 post_time = last_post['created'].replace(tzinfo=None)
-                active_votes = last_post.get('active_votes', [])
-                for vote in active_votes:
-                    if vote['voter'] == competitor:
-                        vote_time_raw = vote['time']
+                permlink = last_post.get('permlink', '') or getattr(last_post, 'permlink', '')
+                votes = self.client.get_active_votes(author, permlink)
+                for vote in votes:
+                    if vote.get('voter') == competitor:
+                        vote_time_raw = vote.get('time') or vote.get('timestamp')
+                        if not vote_time_raw:
+                            continue
                         if isinstance(vote_time_raw, datetime):
                             vote_time = vote_time_raw.replace(tzinfo=None)
                         else:
-                            vote_time = datetime.strptime(str(vote_time_raw), "%Y-%m-%dT%H:%M:%S")
+                            vote_time = datetime.strptime(str(vote_time_raw)[:19], "%Y-%m-%dT%H:%M:%S")
                         delay = (vote_time - post_time).total_seconds() / 60
                         logger.info(
                             f"[{self.voter_username}] {competitor} voted after {delay:.1f}m on @{author}"

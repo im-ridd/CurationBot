@@ -139,6 +139,22 @@ class SteemClient:
         logger.warning(f"All nodes failed for @{author} (get_blog) — skipping this cycle")
         return []
 
+    def get_active_votes(self, author: str, permlink: str) -> list:
+        """Returns active_votes with timestamp via condenser_api.get_active_votes."""
+        for attempt in range(len(self._nodes)):
+            try:
+                raw = self.steem.rpc.get_active_votes(author, permlink)
+                return raw or []
+            except Exception as e:
+                err = str(e)
+                if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
+                    self._rotate_node()
+                    continue
+                logger.error(f"Error retrieving active_votes for @{author}/{permlink}: {e}")
+                return []
+        logger.warning(f"All nodes failed for @{author} (get_active_votes)")
+        return []
+
     def has_already_voted(self, post, voter: str) -> bool:
         votes = post.get_votes()
         return any(v['voter'] == voter for v in votes)
