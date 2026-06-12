@@ -17,6 +17,7 @@ from backend.database import get_db
 from backend.models import VoterAccount, FanbaseEntry, TrailRule
 from backend.config import get_fernet, STEEM_NODES
 from backend.services.bot_manager import BotManager
+from backend.services.steem_client import verify_posting_key
 
 log = logging.getLogger(__name__)
 
@@ -294,17 +295,44 @@ def partial_trail_activity(request: Request):
 @router.post("/voters/add")
 def form_add_voter(
     username: str = Form(...),
-    posting_key: str = Form(...),
+    posting_key: str = Form(None),
     min_voting_power: float = Form(80.0),
     max_post_age_minutes: float = Form(5.0),
     db: Session = Depends(get_db),
 ):
+    username = username.strip().lower()
+    key = posting_key.strip() if posting_key and posting_key.strip() else None
+
+    # Validate key if provided
+    if key:
+        ok, err = verify_posting_key(username, key)
+        if not ok:
+            return RedirectResponse(f"/ui?flash={err.replace(' ', '+')}&error=1", status_code=303)
+
     existing = db.query(VoterAccount).filter(VoterAccount.username == username).first()
     if existing:
-        return RedirectResponse("/ui?flash=Voter+already+exists&error=1", status_code=303)
+        # Account already exists — enable curation if not already, update key only if provided
+        changed = False
+        if key:
+            existing.posting_key_encrypted = _encrypt_key(key)
+            changed = True
+        if existing.trail_only:
+            existing.trail_only = False
+            existing.min_voting_power = min_voting_power
+            existing.max_post_age_minutes = max_post_age_minutes
+            existing.enabled = True
+            changed = True
+        if changed:
+            db.commit()
+        return RedirectResponse(
+            f"/ui/voters/{existing.id}?flash=Voter+abilitato+per+curation",
+            status_code=303,
+        )
+    if not key:
+        return RedirectResponse("/ui?flash=Posting+key+richiesta+per+nuovo+account&error=1", status_code=303)
     voter = VoterAccount(
         username=username,
-        posting_key_encrypted=_encrypt_key(posting_key),
+        posting_key_encrypted=_encrypt_key(key),
         min_voting_power=min_voting_power,
         max_post_age_minutes=max_post_age_minutes,
         enabled=True,
@@ -320,26 +348,35 @@ def form_add_voter(
 @router.post("/trail-accounts/add")
 def form_add_trail_account(
     username: str = Form(...),
-    posting_key: str = Form(...),
+    posting_key: str = Form(None),
     db: Session = Depends(get_db),
 ):
     username = username.strip().lower()
+    key = posting_key.strip() if posting_key and posting_key.strip() else None
+
+    # Validate key if provided
+    if key:
+        ok, err = verify_posting_key(username, key)
+        if not ok:
+            return RedirectResponse(f"/ui/trails?flash={err.replace(' ', '+')}&error=1", status_code=303)
+
     existing = db.query(VoterAccount).filter(VoterAccount.username == username).first()
     if existing:
         if not existing.trail_only:
-            # Already a curation voter — it's already available as a trail follower.
-            # Update its posting key if one was provided, so trail engine can use it.
-            if posting_key.strip():
-                existing.posting_key_encrypted = _encrypt_key(posting_key.strip())
+            # Already a curation voter — update key if provided
+            if key:
+                existing.posting_key_encrypted = _encrypt_key(key)
                 db.commit()
             return RedirectResponse(
-                f"/ui/trails?flash=@{username}+e+gia+un+voter+curation+e+puo+essere+usato+come+follower+trail+%E2%80%94+aggiungi+le+regole+qui+sotto",
+                f"/ui/trails?flash=@{username}+e+gia+un+voter+curation%2C+aggiungi+le+regole+trail+qui+sotto",
                 status_code=303,
             )
         return RedirectResponse("/ui/trails?flash=Account+gia+esistente&error=1", status_code=303)
+    if not key:
+        return RedirectResponse("/ui/trails?flash=Posting+key+richiesta+per+nuovo+account&error=1", status_code=303)
     voter = VoterAccount(
         username=username,
-        posting_key_encrypted=_encrypt_key(posting_key),
+        posting_key_encrypted=_encrypt_key(key),
         enabled=True,
         trail_only=True,
     )

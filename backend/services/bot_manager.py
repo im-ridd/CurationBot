@@ -181,7 +181,8 @@ class BotManager:
         # queue-based reconnect has itself gotten stuck — force a full restart.
         # Curation engine: _last_activity_ts is updated at the top of each
         # main-loop iteration.  Silence for STALL_THRESHOLD means it's frozen.
-        STALL_THRESHOLD = 600  # 10 minutes
+        STALL_THRESHOLD_TRAIL = 600    # 10 min — trail stream should always have ops
+        STALL_THRESHOLD_CURATION = 120  # 2 min — heartbeat updated per-author now
         CHECK_INTERVAL = 60   # check once per minute
 
         while True:
@@ -191,7 +192,7 @@ class BotManager:
             for voter_id, trail in list(self._trails.items()):
                 if not trail.running:
                     continue
-                if trail._last_op_ts > 0 and (now - trail._last_op_ts) > STALL_THRESHOLD:
+                if trail._last_op_ts > 0 and (now - trail._last_op_ts) > STALL_THRESHOLD_TRAIL:
                     logger.warning(
                         f"Watchdog: trail @{trail.voter_username} stalled "
                         f"({(now - trail._last_op_ts)/60:.1f}m no ops) — restarting"
@@ -201,7 +202,7 @@ class BotManager:
             for voter_id, engine in list(self._engines.items()):
                 if not engine.running:
                     continue
-                if engine._last_activity_ts > 0 and (now - engine._last_activity_ts) > STALL_THRESHOLD:
+                if engine._last_activity_ts > 0 and (now - engine._last_activity_ts) > STALL_THRESHOLD_CURATION:
                     logger.warning(
                         f"Watchdog: curation @{engine.voter_username} stalled "
                         f"({(now - engine._last_activity_ts)/60:.1f}m inactive) — restarting"

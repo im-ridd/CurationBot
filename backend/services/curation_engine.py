@@ -2,6 +2,7 @@ import time
 import logging
 import threading
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
@@ -69,6 +70,7 @@ class CurationEngine:
         self.posts_checked = 0
         self.votes_made = 0
         self._activity: deque[dict] = deque(maxlen=50)
+        self._state_lock = threading.Lock()  # protects pending_posts, votes_made, _activity
 
         # Cache for _has_voted_in_last_18h: author -> (timestamp, result)
         # Avoids N heavy API calls per loop tick when the fanbase is large.
@@ -79,14 +81,20 @@ class CurationEngine:
         # Heartbeat updated every main-loop iteration; used by watchdog.
         self._last_activity_ts: float = 0.0
 
+        # Parallel scan: how many authors to check concurrently.
+        # 10 workers × ~5s avg per author = 130 authors in ~65s worst case.
+        self.SCAN_WORKERS = 10
+        self.AUTHOR_TIMEOUT = 30  # seconds per author before skip
+
     def _log_activity(self, event: str, author: str = "", detail: str = "", level: str = "info"):
-        self._activity.appendleft({
-            "ts": datetime.utcnow().strftime("%H:%M:%S"),
-            "event": event,
-            "author": author,
-            "detail": detail,
-            "level": level,
-        })
+        with self._state_lock:
+            self._activity.appendleft({
+                "ts": datetime.utcnow().strftime("%H:%M:%S"),
+                "event": event,
+                "author": author,
+                "detail": detail,
+                "level": level,
+            })
 
     # ── lifecycle ──
 
@@ -198,26 +206,48 @@ class CurationEngine:
 
     def _main_loop(self):
         logger.info(
-            f"[{self.voter_username}] Monitoring {len(self.authors)} authors"
+            f"[{self.voter_username}] Monitoring {len(self.authors)} authors "
+            f"(parallel scan, {self.SCAN_WORKERS} workers)"
         )
-        while self.running:
-            try:
-                self._last_activity_ts = time.time()
-                with self._lock:
-                    authors_snapshot = dict(self.authors)
-
-                for author_name, runtime in authors_snapshot.items():
-                    if not self.running:
-                        break
+        with ThreadPoolExecutor(
+            max_workers=self.SCAN_WORKERS,
+            thread_name_prefix=f"cur-{self.voter_username}"
+        ) as pool:
+            while self.running:
+                try:
+                    self._last_activity_ts = time.time()
                     self._check_pending_posts()
-                    if runtime.can_vote():
-                        self._check_author(author_name, runtime)
 
-                self._log_status()
-                time.sleep(self.interval_seconds)
-            except Exception as e:
-                logger.error(f"[{self.voter_username}] Main loop error: {e}")
-                time.sleep(self.interval_seconds)
+                    with self._lock:
+                        authors_snapshot = dict(self.authors)
+
+                    # Submit all eligible authors in parallel
+                    futures = {}
+                    for author_name, runtime in authors_snapshot.items():
+                        if not self.running:
+                            break
+                        if runtime.can_vote():
+                            futures[pool.submit(self._check_author, author_name, runtime)] = author_name
+
+                    # Collect results with per-author timeout
+                    for future, author_name in futures.items():
+                        self._last_activity_ts = time.time()
+                        try:
+                            future.result(timeout=self.AUTHOR_TIMEOUT)
+                        except FuturesTimeoutError:
+                            logger.warning(
+                                f"[{self.voter_username}] Timeout on @{author_name} "
+                                f"({self.AUTHOR_TIMEOUT}s) — skipping"
+                            )
+                            future.cancel()
+                        except Exception as e:
+                            logger.error(f"[{self.voter_username}] Error on @{author_name}: {e}")
+
+                    self._log_status()
+                    time.sleep(self.interval_seconds)
+                except Exception as e:
+                    logger.error(f"[{self.voter_username}] Main loop error: {e}")
+                    time.sleep(self.interval_seconds)
 
         logger.info(f"[{self.voter_username}] Loop exited")
 
@@ -281,7 +311,8 @@ class CurationEngine:
                 return False
 
             if self.client.upvote(post, weight=runtime.vote_percentage * 1.0, voter=self.voter_username):
-                self.votes_made += 1
+                with self._state_lock:
+                    self.votes_made += 1
                 runtime.record_vote()
                 # Invalidate history cache so the next loop knows we already voted
                 self._vote_history_cache.pop(author, None)
@@ -346,13 +377,14 @@ class CurationEngine:
 
         if post_age < effective_delay:
             vote_at = post_time.replace(tzinfo=None) + timedelta(minutes=effective_delay)
-            self.pending_posts.append(PendingPost(
-                author=author,
-                post=latest_post,
-                post_time=post_time.replace(tzinfo=None),
-                vote_time=vote_at,
-                runtime=runtime,
-            ))
+            with self._state_lock:
+                self.pending_posts.append(PendingPost(
+                    author=author,
+                    post=latest_post,
+                    post_time=post_time.replace(tzinfo=None),
+                    vote_time=vote_at,
+                    runtime=runtime,
+                ))
             wait_min = effective_delay - post_age
             logger.info(
                 f"[{self.voter_username}] Queued @{author} — vote in {wait_min:.1f}m"
@@ -363,15 +395,21 @@ class CurationEngine:
 
     def _check_pending_posts(self):
         current_time = datetime.utcnow()
-        for pd in list(self.pending_posts):
+        with self._state_lock:
+            pending_snapshot = list(self.pending_posts)
+        for pd in pending_snapshot:
             max_time = pd.post_time + timedelta(minutes=self.max_post_age_minutes)
             if current_time >= max_time:
-                self.pending_posts.remove(pd)
+                with self._state_lock:
+                    if pd in self.pending_posts:
+                        self.pending_posts.remove(pd)
                 continue
             if current_time >= pd.vote_time:
                 logger.info(f"[{self.voter_username}] Processing queued vote for @{pd.author}")
                 if self._upvote_post(pd.post, pd.author, pd.runtime):
-                    self.pending_posts.remove(pd)
+                    with self._state_lock:
+                        if pd in self.pending_posts:
+                            self.pending_posts.remove(pd)
 
     def _log_status(self):
         try:
@@ -390,21 +428,25 @@ class CurationEngine:
     # ── public status ──
 
     def get_status(self) -> dict:
+        with self._state_lock:
+            pending = list(self.pending_posts)
+            activity = list(self._activity)
+            votes_made = self.votes_made
         return {
             "voter": self.voter_username,
             "voter_id": self.voter_id,
             "running": self.running,
             "authors_count": len(self.authors),
             "posts_checked": self.posts_checked,
-            "votes_made": self.votes_made,
-            "pending_posts": len(self.pending_posts),
+            "votes_made": votes_made,
+            "pending_posts": len(pending),
             "pending_details": [
                 {
                     "author": p.author,
                     "vote_time": p.vote_time.isoformat(),
                     "title": getattr(p.post, 'title', '')[:60],
                 }
-                for p in self.pending_posts
+                for p in pending
             ],
-            "activity": list(self._activity),
+            "activity": activity,
         }

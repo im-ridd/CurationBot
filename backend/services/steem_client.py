@@ -11,6 +11,26 @@ from backend.config import STEEM_NODES
 logger = logging.getLogger(__name__)
 
 
+def verify_posting_key(username: str, wif_key: str) -> tuple[bool, str]:
+    """Check that wif_key is the posting key for username.
+    Returns (True, "") on success or (False, error_message).
+    """
+    try:
+        from beemgraphenebase.account import PrivateKey as _PrivKey
+        from backend.config import STEEM_NODES as _NODES
+        steem = Steem(node=_NODES, timeout=15)
+        account = Account(username, blockchain_instance=steem)
+        posting_keys = [auth[0] for auth in account["posting"]["key_auths"]]
+        pub = str(_PrivKey(wif_key).get_public_key())
+        if pub in posting_keys:
+            return True, ""
+        return False, f"La posting key non corrisponde all'account @{username}"
+    except AccountDoesNotExistsException:
+        return False, f"Account @{username} non trovato sulla blockchain"
+    except Exception as e:
+        return False, f"Errore verifica posting key: {e}"
+
+
 class SteemClient:
     """Shared wrapper around beem. One instance per posting key."""
 
@@ -18,6 +38,25 @@ class SteemClient:
         self._nodes = nodes or STEEM_NODES
         self._posting_key = posting_key
         self.steem: Steem | None = None
+
+    # Errors that mean the current node doesn't support a required API method.
+    # Beem doesn't auto-rotate on these, so we do it manually.
+    _BAD_NODE_SIGNALS = (
+        "Could not find method",
+        "method_itr != api_itr",
+    )
+
+    def _is_bad_node_error(self, err: str) -> bool:
+        return any(s in err for s in self._BAD_NODE_SIGNALS)
+
+    def _rotate_node(self):
+        """Ask beem to switch to the next node in its list."""
+        try:
+            if self.steem and hasattr(self.steem, 'rpc'):
+                self.steem.rpc.next()
+                logger.warning("Rotated to next Steem node (API incompatibility)")
+        except Exception:
+            pass
 
     def connect(self) -> bool:
         try:
@@ -29,31 +68,49 @@ class SteemClient:
             return False
 
     def get_account(self, username: str) -> Account | None:
-        try:
-            return Account(username, blockchain_instance=self.steem)
-        except AccountDoesNotExistsException:
-            logger.error(f"Account @{username} does not exist")
-            return None
-        except Exception as e:
-            logger.error(f"Error fetching account @{username}: {e}")
-            return None
+        for attempt in range(len(self._nodes)):
+            try:
+                return Account(username, blockchain_instance=self.steem)
+            except AccountDoesNotExistsException:
+                logger.error(f"Account @{username} does not exist")
+                return None
+            except Exception as e:
+                err = str(e)
+                if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
+                    self._rotate_node()
+                    continue
+                logger.error(f"Error fetching account @{username}: {e}")
+                return None
+        return None
 
     def get_latest_post(self, author: str):
-        try:
-            account = Account(author, blockchain_instance=self.steem)
-            posts = account.get_blog(limit=1)
-            return posts[0] if posts else None
-        except Exception as e:
-            logger.error(f"Error retrieving latest post for @{author}: {e}")
-            return None
+        for attempt in range(len(self._nodes)):
+            try:
+                account = Account(author, blockchain_instance=self.steem)
+                posts = account.get_blog(limit=1)
+                return posts[0] if posts else None
+            except Exception as e:
+                err = str(e)
+                if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
+                    self._rotate_node()
+                    continue
+                logger.error(f"Error retrieving latest post for @{author}: {e}")
+                return None
+        return None
 
     def get_blog(self, author: str, limit: int = 5):
-        try:
-            account = Account(author, blockchain_instance=self.steem)
-            return account.get_blog(limit=limit)
-        except Exception as e:
-            logger.error(f"Error retrieving blog for @{author}: {e}")
-            return []
+        for attempt in range(len(self._nodes)):
+            try:
+                account = Account(author, blockchain_instance=self.steem)
+                return account.get_blog(limit=limit)
+            except Exception as e:
+                err = str(e)
+                if self._is_bad_node_error(err) and attempt < len(self._nodes) - 1:
+                    self._rotate_node()
+                    continue
+                logger.error(f"Error retrieving blog for @{author}: {e}")
+                return []
+        return []
 
     def has_already_voted(self, post, voter: str) -> bool:
         votes = post.get_votes()
