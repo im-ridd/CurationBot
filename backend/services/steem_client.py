@@ -44,6 +44,8 @@ class SteemClient:
     _BAD_NODE_SIGNALS = (
         "Could not find method",
         "method_itr != api_itr",
+        "Bad Cast",
+        "Invalid cast",
     )
 
     def _is_bad_node_error(self, err: str) -> bool:
@@ -81,6 +83,7 @@ class SteemClient:
                     continue
                 logger.error(f"Error fetching account @{username}: {e}")
                 return None
+        logger.warning(f"All nodes failed for @{username} (get_account) — skipping this cycle")
         return None
 
     def get_latest_post(self, author: str):
@@ -96,6 +99,7 @@ class SteemClient:
                     continue
                 logger.error(f"Error retrieving latest post for @{author}: {e}")
                 return None
+        logger.warning(f"All nodes failed for @{author} (get_latest_post) — skipping this cycle")
         return None
 
     def get_blog(self, author: str, limit: int = 5):
@@ -110,6 +114,7 @@ class SteemClient:
                     continue
                 logger.error(f"Error retrieving blog for @{author}: {e}")
                 return []
+        logger.warning(f"All nodes failed for @{author} (get_blog) — skipping this cycle")
         return []
 
     def has_already_voted(self, post, voter: str) -> bool:

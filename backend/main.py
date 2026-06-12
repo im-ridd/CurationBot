@@ -35,9 +35,10 @@ def main():
 
     if args.autostart:
         # Ensure tables exist before autostart
-        from backend.database import engine
+        from backend.database import engine, run_migrations
         from backend.models import Base
         Base.metadata.create_all(bind=engine)
+        run_migrations()
 
         from backend.services.bot_manager import BotManager
         result = BotManager().start_all_enabled()
