@@ -382,10 +382,6 @@ class CurationEngine:
             return False
 
     def _check_author(self, author: str, runtime: AuthorRuntime):
-        account = self.client.get_account(author)
-        if not account:
-            return
-
         if self._has_voted_in_last_18h(author, runtime.daily_vote_limit):
             return
 
@@ -496,9 +492,15 @@ class CurationEngine:
     def _log_status(self):
         try:
             vp = self.client.get_voting_power(self.voter_username)
+            if vp is None:
+                logger.info(
+                    f"[{self.voter_username}] VP=? | "
+                    f"checked={self.posts_checked} voted={self.votes_made} "
+                    f"pending={len(self.pending_posts)}"
+                )
+                return
             vp_to_full = 100 - vp
             hours_to_full = (vp_to_full * 432000) / (100 * 3600)
-
             logger.info(
                 f"[{self.voter_username}] VP={vp:.1f}% | "
                 f"checked={self.posts_checked} voted={self.votes_made} "
